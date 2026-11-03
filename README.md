@@ -73,5 +73,7 @@ be restored on any device with **Restore from backup**. Backup files are not par
 | `vendor/tesseract/` | Text recognition library (Tesseract.js 5.1.1, Apache 2.0) and English data |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline use and home screen icon |
 
-© 2026 Dr. Shailesh Sengar. Software code was developed with AI assistance (Claude, Anthropic).
+© 2026 Dr. Shailesh Sengar. 
 Assay rules were taken from the kit inserts and checked against hand calculations.
+
+Disclaimer. ELI-Check is an independent research and quality control tool. It is not affiliated with, endorsed by or supported by any kit manufacturer. Kit and product names are trademarks of their respective owners and are used only to identify the assay a rule applies to. Assay rules are summarised from the kit inserts listed; always follow the current insert supplied with the kit. The tool is not a diagnostic device and must not be used as the sole basis for reporting patient results.
