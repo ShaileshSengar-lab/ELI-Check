@@ -58,7 +58,7 @@ be restored on any device with **Restore from backup**. Backup files are not par
   signed register remain the record of the reported result.
 - Text recognition can misread digits on faded thermal paper. Every value must be checked against
   the slip before saving; the app highlights the ones most likely to be wrong, but cannot catch all.
-- Westgard limits are set from the first 20 runs of each assay and lot (shown as provisional with fewer).
+- Westgard limits are set from the first 20 runs of each assay, lot and reader (shown as provisional with fewer).
 
 ## Files
 
@@ -67,7 +67,7 @@ be restored on any device with **Restore from backup**. Backup files are not par
 | `index.html`, `css/app.css` | Page and styles |
 | `js/assays.js` | Kit insert rules, one block per kit |
 | `js/engine.js` | Calculations: cutoff, validity, results, register checks, Westgard, audit |
-| `js/parse.js` | Reads slip text in both reader formats |
+| `js/parse.js` | Reads slip text from OD-only and cutoff-printing readers |
 | `js/ocr.js` | Photo handling and text recognition |
 | `js/app.js` | Screens, saving, export |
 | `vendor/tesseract/` | Text recognition library (Tesseract.js 5.1.1, Apache 2.0) and English data |
