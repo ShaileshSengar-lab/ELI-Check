@@ -1,0 +1,15 @@
+{
+  "name": "ELI-Check",
+  "short_name": "ELI-Check",
+  "description": "Checks ELISA plate reader results against the kit insert, tracks controls with Westgard rules, and audits the run register.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f5f4",
+  "theme_color": "#0e6e66",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
