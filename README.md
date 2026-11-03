@@ -1,7 +1,7 @@
 # ELI-Check
 
 **Ensuring Laboratory Integrity.** A web app for the serology and virology laboratory.
-It reads ELISA plate reader slips, checks each run against the kit insert, tracks controls with
+It reads ELISA plate reader slips, recalculates the cutoff and sample results from the ODs to check each run against the kit insert, tracks controls with
 Levey-Jennings charts and Westgard rules, and audits what was written in the run register.
 
 It runs in any phone or computer browser, needs no account, and keeps its data on the device.
@@ -15,7 +15,7 @@ After the first visit it also works offline.
   so photos never leave the device. Values can also be pasted or typed.
 - **Shows every value for checking before saving.** Faded or unclear values, missed lines and
   printed ratios that do not match OD ÷ cutoff are highlighted.
-- **Applies the insert.** Run validity, insert cutoff, ratio or units, and result category for
+- **Recalculates results.** From the ODs it works out run validity, the insert cutoff, the ratio or units, and the result category for
   each sample, using the rules in `js/assays.js`.
 - **Compares the reader with the insert.** For readers that print a cutoff, it checks the
   programmed formula against the insert and lists samples falling between the two cutoffs.
