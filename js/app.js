@@ -70,6 +70,16 @@
   }
   const findingsHTML = list => `<ul class="findings">${list.map(f => `<li class="${f.sev}"><div><b>${esc(f.title)}</b>${f.detail ? `<p>${esc(f.detail)}</p>` : ""}</div></li>`).join("")}</ul>`;
   const resultText = (a, s) => s.missing ? "–" : a.units ? f2(s.units) : f3(s.ratio);
+  const bandName = code => ({ POS: "Positive", NEG: "Negative", EQV: "Equivocal", GZ: "Grey zone", IR: "Reactive" })[code] || "";
+  const resultLabel = a => a.units ? (a.units.label || "Units") : "S/CO";
+  // result cells for one review row: calculated value and category, or why there is none
+  function resultCells(a, w, s, valid) {
+    if (w.role !== "S") return `<td class="mono note">${w.role === "BLK" ? "Blank" : w.role}</td><td></td>`;
+    if (!s || s.missing || numOrNull(w.od) == null) return `<td class="mono">–</td><td class="note">enter OD</td>`;
+    if (s.noCutoff || !s.band) return `<td class="mono">–</td><td class="note">needs controls</td>`;
+    const code = s.band.code, cls = E.isReactiveCode(code) ? "st-bad" : /EQV|GZ/.test(code) ? "st-warn" : "";
+    return `<td class="mono ${cls}"><b>${resultText(a, s)}</b></td><td class="${cls}"><b>${esc(bandName(code))}</b>${valid ? "" : ' <span class="note">(run invalid)</span>'}</td>`;
+  }
 
   function plateHTML(wells, ev) {
     const byPos = {};
@@ -216,7 +226,7 @@
       pcNotRun: !!(base && base.pcNotRun)
     };
   }
-  const saveDraft = () => { if (draft && !draft.id) writeJSON(DRAFT, draft); };
+  const saveDraft = () => { if (draft && !draft.id) { draft.updated = new Date().toISOString(); const { restored, ...keep } = draft; writeJSON(DRAFT, keep); } };
 
   function renderEditor(editId) {
     if (editId) {
@@ -226,6 +236,7 @@
     } else if (!draft || draft.id) {
       const saved = readJSON(DRAFT, null);
       draft = saved && !saved.id ? saved : newDraft(null);
+      draft.restored = !!(saved && !saved.id && (saved.wells || []).length);
     }
     const a = byId[draft.assayId];
     view.innerHTML = `<div class="stack">
@@ -238,6 +249,7 @@
           <label class="f" for="fTest">Test no. on slip<input id="fTest" inputmode="numeric" value="${esc(draft.testNo)}"></label>
         </div>
         <label class="f" for="fNotes">Notes<input id="fNotes" value="${esc(draft.notes)}" placeholder="Repeats, corrections, anything unusual"></label>
+        ${draft.restored ? `<p class="note st-warn">An unsaved run from earlier${draft.updated ? ` (${esc(new Date(draft.updated).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))})` : ""} is open, with ${draft.wells.length} wells. Press <b>Start over</b> to begin a fresh run, or carry on with it.</p>` : ""}
       </div>
 
       <div class="panel" id="capture">
@@ -287,6 +299,7 @@
     const nRatio = ev.samples.filter(s => s.printedRatioMismatch).length;
     const ctrlCount = k => draft.wells.filter(w => w.role === k).length;
     const exp = numOrNull(draft.expected);
+    const showReg = !!prefs.showRegister;
     const rows = draft.wells.map((w, i) => {
       const s = sBy[w.pos];
       const notes = [];
@@ -297,22 +310,24 @@
       if (w.labelMismatch) notes.push(`slip label read as ${w.labelMismatch}`);
       if (w.checkOrder) notes.push("a nearby line was missed; check these values are in the right wells");
       if (s && s.printedRatioMismatch) notes.push("ratio does not match");
-      const cls = numOrNull(w.od) == null ? "missing" : notes.length ? "flag" : "";
+      const code = s && s.band ? s.band.code : "";
+      const cls = [numOrNull(w.od) == null ? "missing" : notes.length ? "flag" : "", E.isReactiveCode(code) ? "rx pos" : /EQV|GZ/.test(code) ? "eq" : ""].join(" ").trim();
       return `<tr class="${cls}" data-i="${i}">
         <td><input data-k="pos" value="${esc(w.pos)}" size="4" aria-label="Well"></td>
         <td><select data-k="role" aria-label="Role">${["S", "NC", "PC", "BLK"].map(r => `<option value="${r}" ${w.role === r ? "selected" : ""}>${r === "S" ? "Sample" : r === "BLK" ? "Blank" : r}</option>`).join("")}</select></td>
         <td><input data-k="od" inputmode="decimal" value="${w.od ?? ""}" aria-label="OD"></td>
         ${showPrinted ? `<td><input data-k="printedRatio" inputmode="decimal" value="${w.printedRatio ?? ""}" aria-label="Printed ratio"></td><td><input data-k="printedFlag" value="${esc(w.printedFlag || "")}" size="3" aria-label="Printed flag"></td>` : ""}
-        <td><input data-k="labNo" value="${esc(w.labNo || "")}" aria-label="Lab number"></td>
+        ${resultCells(a, w, s, ev.valid)}
+        ${showReg ? `<td><input data-k="labNo" value="${esc(w.labNo || "")}" aria-label="Lab number"></td>
         <td><input data-k="regOD" inputmode="decimal" value="${w.regOD ?? ""}" aria-label="Register OD"></td>
-        <td><input data-k="regUnits" inputmode="decimal" value="${w.regUnits ?? ""}" aria-label="Register result"></td>
+        <td><input data-k="regUnits" inputmode="decimal" value="${w.regUnits ?? ""}" aria-label="Register result"></td>` : ""}
         <td style="text-align:center"><input type="checkbox" data-k="uncertain" ${w.uncertain ? "checked" : ""} aria-label="Hard to read" style="width:auto"></td>
         <td class="t note-cell">${esc(notes.join("; "))}</td>
         <td><button class="btn small" data-del="${i}" aria-label="Remove well ${esc(w.pos)}">×</button></td></tr>`;
     }).join("");
     return `<div class="row between"><h2>Check every value against the slip</h2>
-        <div class="row"><button class="btn small" id="applyLayout">Mark usual controls</button><button class="btn small" id="addRow">Add well</button></div></div>
-      <p class="note">Text recognition misreads digits on faded thermal paper, so compare each row with the slip. Rows shaded amber need a look. The register columns are optional; fill them to check what was written by hand.</p>
+        <div class="row"><button class="btn small primary" id="recalc">Recalculate</button><button class="btn small" id="applyLayout">Mark usual controls</button><button class="btn small" id="addRow">Add well</button><button class="btn small" id="toggleReg">${showReg ? "Hide register columns" : "Compare with register"}</button></div></div>
+      <p class="note">Compare each row with the slip; rows shaded amber need a look (untick <b>Unclear</b> once checked). The ${esc(resultLabel(a))} and result are calculated from the insert and update as you type; positive samples are shown in red. After changing controls or values, press <b>Recalculate</b> to refresh everything. <b>Compare with register</b> adds columns to check what was written by hand.</p>
       <div class="fields">
         <div><h3>Wells</h3><span class="mono">${draft.wells.length}</span></div>
         <div><h3>Controls</h3><span class="mono">NC ${ctrlCount("NC")} · PC ${ctrlCount("PC")}${ctrlCount("BLK") ? " · blank " + ctrlCount("BLK") : ""}</span></div>
@@ -325,8 +340,8 @@
         <label class="f" for="pForm">Printed formula<input id="pForm" value="${esc(draft.printed?.formula || "")}" placeholder="${esc(a.readerProgram?.text || "")}"></label>
         <label class="f" for="pGrey">Grey zone on slip<input id="pGrey" value="${esc(draft.printed?.greyZone || "")}" placeholder="NO"></label></div>` : ""}
       ${controlsHTML(a)}
-      <div class="tbl tall"><table class="data edit"><thead><tr><th class="l">Well</th><th class="l">Role</th><th class="l">OD</th>
-        ${showPrinted ? '<th class="l">Printed ratio</th><th class="l">Flag</th>' : ""}<th class="l">Lab no.</th><th class="l">Register OD</th><th class="l">Register ${a.units ? "units" : "ratio"}</th><th>Unclear</th><th class="l">Check</th><th></th></tr></thead>
+      <div class="tbl tall"><table class="data edit" id="wellTable"><thead><tr><th class="l">Well</th><th class="l">Role</th><th class="l">OD</th>
+        ${showPrinted ? '<th class="l">Printed ratio</th><th class="l">Flag</th>' : ""}<th class="l">${esc(resultLabel(a))}</th><th class="l">Result</th>${showReg ? `<th class="l">Lab no.</th><th class="l">Register OD</th><th class="l">Register ${a.units ? "units" : "ratio"}</th>` : ""}<th>Unclear</th><th class="l">Check</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div>`;
   }
 
@@ -376,7 +391,7 @@
   }
 
   function bindReview() {
-    const tb = $("#review tbody");
+    const tb = $("#wellTable tbody");
     if (tb) {
       tb.addEventListener("change", e => {
         const tr = e.target.closest("tr"); if (!tr) return;
@@ -422,6 +437,10 @@
       }
       renderReview();
     };
+    const rc = $("#recalc");
+    if (rc) rc.onclick = () => { if (draft.ctrl) syncControls(); renderReview(); const pv = $("#preview"); if (pv) pv.scrollIntoView({ behavior: "smooth", block: "start" }); toast("Recalculated with the current controls and values"); };
+    const tr2 = $("#toggleReg");
+    if (tr2) tr2.onclick = () => { prefs.showRegister = !prefs.showRegister; savePrefs(); renderReview(); };
     const add = $("#addRow");
     if (add) add.onclick = () => { draft.wells.push({ pos: nextPos(), od: null, role: "S" }); renderReview(); };
     const ex = $("#fExpected");
@@ -444,8 +463,17 @@
     if (w.labelMismatch) notes.push(`slip label read as ${w.labelMismatch}`);
     if (w.checkOrder) notes.push("a nearby line was missed; check these values are in the right wells");
     if (s && s.printedRatioMismatch) notes.push("ratio does not match");
-    tr.className = numOrNull(w.od) == null ? "missing" : notes.length ? "flag" : "";
+    // a value change can move the cutoff (controls) or this sample's result: redraw the table
+    if (w.role !== "S") { renderReview(); return; }
+    const code = s && s.band ? s.band.code : "";
+    tr.className = [numOrNull(w.od) == null ? "missing" : notes.length ? "flag" : "", E.isReactiveCode(code) ? "rx pos" : /EQV|GZ/.test(code) ? "eq" : ""].join(" ").trim();
     const nc = $(".note-cell", tr); if (nc) nc.textContent = notes.join("; ");
+    const tds = tr.querySelectorAll("td"), odTd = tr.querySelector('[data-k="od"]').closest("td");
+    let k = [...tds].indexOf(odTd) + 1;
+    if (a.readerProgram || draft.format === "lisascan") k += 2;
+    const tmp = document.createElement("tbody"); tmp.innerHTML = `<tr>${resultCells(a, w, s, ev.valid)}</tr>`;
+    const nu = tmp.querySelectorAll("td");
+    if (tds[k] && tds[k + 1]) { tds[k].replaceWith(nu[0]); tds[k + 1].replaceWith(nu[1]); }
   }
 
   /* Control wells: the user states where controls were placed. Defaults come from the last saved run of
@@ -579,8 +607,30 @@
     if (!draft.rolesTouched && draft.format !== "lisascan") defaultRoles(false);
   }
 
-  function ingest(parsed) {
+  /* A new reading while the run already holds values from an earlier slip: ask, never mix silently. */
+  function ingest(parsed, choice) {
     if (!parsed || !parsed.wells.length) { toast("No values were found. Try a closer photo, or type the values."); return; }
+    const held = draft.wells.filter(w => numOrNull(w.od) != null && !w.ctrlPlaceholder).length;
+    if (held && !choice) {
+      const box = $("#photoArea");
+      box.hidden = false;
+      box.innerHTML = `<div class="panel provisional stack">
+        <h3>This run already has ${held} values from an earlier slip</h3>
+        <p class="note">Is this photo a new slip, or the next strip of the same slip?</p>
+        <div class="row"><button class="btn primary" id="ingNew">New slip: replace the earlier values</button>
+          <button class="btn" id="ingAdd">Next strip of the same slip: add after them</button>
+          <button class="btn" id="ingCancel">Cancel</button></div></div>`;
+      $("#ingNew").onclick = () => { box.hidden = true; ingest(parsed, "new"); };
+      $("#ingAdd").onclick = () => { box.hidden = true; ingest(parsed, "add"); };
+      $("#ingCancel").onclick = () => { box.hidden = true; };
+      box.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (choice === "new") {
+      Object.assign(draft, { wells: [], ctrl: null, printed: null, format: null, rolesTouched: false, pcNotRun: false, expected: "" });
+      $("#startPos") && ($("#startPos").value = "A1");
+      parsed.wells.forEach((w, i) => { if (parsed.format !== "lisascan" && !w.pos) w.pos = E.posAt(i); });
+    }
     if (parsed.date && !draft.date) draft.date = parsed.date;
     if (parsed.testNo && !draft.testNo) draft.testNo = parsed.testNo;
     if (parsed.format === "lisascan") {
