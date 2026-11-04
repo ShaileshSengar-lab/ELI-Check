@@ -62,7 +62,9 @@
     return c;
   }
 
-  /* Crop, convert to grey, enlarge small text and stretch contrast. */
+  /* Crop, enlarge small text and stretch contrast. The red channel is used instead of plain grey:
+     printed black text stays dark, while yellow, green and pink highlighter and red pen marks turn
+     pale, so they interfere less with reading. */
   function prepare(canvas, crop) {
     const r = crop || { x: 0, y: 0, w: canvas.width, h: canvas.height };
     const target = 1100;
@@ -75,7 +77,7 @@
     const img = g.getImageData(0, 0, c.width, c.height), d = img.data;
     const hist = new Uint32Array(256);
     for (let i = 0; i < d.length; i += 4) {
-      const v = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+      const v = d[i];
       d[i] = v; hist[v]++;
     }
     const total = d.length / 4;

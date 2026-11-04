@@ -240,7 +240,7 @@
       </div>
 
       <div class="panel" id="capture">
-        <div class="row between"><h2>Read the slip</h2><span class="note">${esc(a.reader)}</span></div>
+        <div class="row between"><h2>Read the slip</h2><span class="note">Reader: ${esc(a.reader)}</span></div>
         <div class="dropzone">
           <p class="note">Photograph the slip flat and in good light. If it is cut into strips, read them one at a time, in order. Drag on the photo to mark just the slip, so handwriting around it is ignored.</p>
           <div class="row">
@@ -357,7 +357,7 @@
     $("#photo").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) openPhoto(f); };
     $("#showPaste").onclick = () => { $("#pasteArea").hidden = false; $("#pasteText").focus(); };
     $("#hidePaste").onclick = () => { $("#pasteArea").hidden = true; };
-    $("#readPaste").onclick = () => { ingest(P.parse($("#pasteText").value, { startPos: $("#startPos").value || "A1" })); $("#pasteArea").hidden = true; $("#pasteText").value = ""; };
+    $("#readPaste").onclick = () => { ingest(P.parse($("#pasteText").value, { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout })); $("#pasteArea").hidden = true; $("#pasteText").value = ""; };
     $("#addBlank").onclick = () => {
       const start = Math.max(0, E.posIndex($("#startPos").value || "A1"));
       for (let i = 0; i < 8; i++) { const p = E.posAt(start + i); if (p) draft.wells.push({ pos: p, od: null, role: "S" }); }
@@ -424,7 +424,8 @@
     if (parsed.format === "lisascan") {
       if (parsed.printed) draft.printed = { ...(draft.printed || {}), ...parsed.printed };
       if (draft.wells.length) {
-        // A further strip: continue positions and sample numbers
+        // A further strip: continue positions and sample numbers (empty control rows belong only to the first strip)
+        parsed.wells = parsed.wells.filter(w => !(w.missing && w.role !== "S"));
         let i = E.posIndex(nextPos());
         const lastN = Math.max(0, ...draft.wells.filter(w => w.role === "S").map(w => w.n || 0));
         let k = 0;
@@ -494,7 +495,7 @@
         const out = await O.read(shot.canvas, shot.crop, m => {
           if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; msg.textContent = "Reading values…"; }
         });
-        const parsed = P.parse(out.lines, { startPos: $("#startPos").value || "A1" });
+        const parsed = P.parse(out.lines, { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout });
         $("#photoArea").hidden = true; shot = null;
         ingest(parsed);
       } catch (e) {

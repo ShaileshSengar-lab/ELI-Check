@@ -179,6 +179,8 @@
       if (od == null) { s.missing = true; samples.push(s); continue; }
       const odCalc = (assay.negZero != null && od < 0 && od >= assay.negZero) ? 0 : od;
       if (odCalc !== od) s.negTakenAsZero = true;
+      // Without a cutoff (controls not marked or not read) no sample can be classified
+      if (!isFinite(cutoff) || cutoff <= 0) { s.ratio = null; s.units = null; s.band = null; s.noCutoff = true; samples.push(s); continue; }
       s.ratio = odCalc / cutoff;
       s.units = assay.units ? s.ratio * assay.units.factor : null;
       s.band = band(assay, s.ratio);
