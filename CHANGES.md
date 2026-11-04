@@ -91,3 +91,4 @@ First public release as ELI-Check (Ensuring Laboratory Integrity).
 - Monthly IQC report for printing or saving as PDF, with signature blocks.
 - Audit summary, CSV export, and backup and restore of all runs on a device.
 - Works offline after the first visit and can be added to a phone's home screen.
+  
