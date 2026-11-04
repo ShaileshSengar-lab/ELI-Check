@@ -217,7 +217,7 @@
     const add = (sev, title, detail) => F.push({ sev, title, detail });
     if (!isFinite(cutoff)) add("bad", "Cutoff cannot be calculated", `No ${assay.cutoff.base} value was found. Mark the control wells for this run.`);
     checks.filter(c => c.pass === false).forEach(c =>
-      add("bad", `Run invalid: ${c.rule.text}`, c.unreadable ? `${c.unreadable.join(", ")} could not be read, so the run cannot be confirmed valid.` : c.missing ? "This control was not read on the plate." :
+      add("bad", `Run invalid: ${c.rule.text}`, c.unreadable ? `${c.unreadable.join(", ")} could not be read, so the run cannot be confirmed valid.` : c.missing ? (c.rule.ctrl === "PC" && run.pcNotRun ? "Recorded as not run on this plate. The insert requires a PC, so results from this plate cannot be validated." : "This control was not read on the plate. Enter its well under Control wells.") :
         `Value ${Array.isArray(c.value) ? c.value.map(v => v.toFixed(4)).join(", ") : Number(c.value).toFixed(4)}. The insert requires the run to be repeated.`));
     const disc = samples.filter(s => s.readerDiscordant);
     if (disc.length) add("bad", `${disc.length} sample${disc.length > 1 ? "s" : ""} flagged differently by the reader and the insert`,

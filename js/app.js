@@ -212,7 +212,8 @@
     return {
       id: base ? base.id : null, assayId, date: base ? base.date : "", kitLot: base?.kitLot || "", testNo: base?.testNo ?? "",
       notes: base?.notes || "", source: base?.source || "", printed: base?.printed ? { ...base.printed } : null,
-      wells: base ? base.wells.map(w => ({ ...w })) : [], rolesTouched: !!base, format: base ? (base.printed ? "lisascan" : "merilyzer") : null, expected: ""
+      wells: base ? base.wells.map(w => ({ ...w })) : [], rolesTouched: !!base, format: base ? (base.printed ? "lisascan" : "merilyzer") : null, expected: "",
+      pcNotRun: !!(base && base.pcNotRun)
     };
   }
   const saveDraft = () => { if (draft && !draft.id) writeJSON(DRAFT, draft); };
@@ -242,10 +243,12 @@
       <div class="panel" id="capture">
         <div class="row between"><h2>Read the slip</h2><span class="note">Reader: ${esc(a.reader)}</span></div>
         <div class="dropzone">
-          <p class="note">Photograph the slip flat and in good light. If it is cut into strips, read them one at a time, in order. Drag on the photo to mark just the slip, so handwriting around it is ignored.</p>
+          <p class="note"><b>Scan with camera</b> straightens the slip and evens out the light before reading. For the best result, scan the slip <b>before</b> anything is highlighted or written on it, flat and in good light. Strips can be laid side by side. Photos already taken can be used with <b>Choose photo</b>.</p>
           <div class="row">
-            <label class="btn primary" for="photo">Take or choose photo</label>
+            <button class="btn primary" id="scanCam">Scan with camera</button>
+            <label class="btn" for="photo">Choose photo</label>
             <input id="photo" type="file" accept="image/*" hidden>
+            <input id="photoCam" type="file" accept="image/*" capture="environment" hidden>
             <button class="btn" id="showPaste">Paste slip text</button>
             <button class="btn" id="addBlank">Type values</button>
           </div>
@@ -289,6 +292,8 @@
       const notes = [];
       if (numOrNull(w.od) == null) notes.push("missing");
       if (w.uncertain) notes.push("hard to read");
+      if (w.rereadFixed) notes.push("corrected by a second reading (agrees with the printed ratio)");
+      if (w.rereadAlt != null && numOrNull(w.od) != null && Math.abs(w.rereadAlt - Number(w.od)) > 1e-9) notes.push(`second reading: ${w.rereadAlt}`);
       if (w.labelMismatch) notes.push(`slip label read as ${w.labelMismatch}`);
       if (w.checkOrder) notes.push("a nearby line was missed; check these values are in the right wells");
       if (s && s.printedRatioMismatch) notes.push("ratio does not match");
@@ -319,6 +324,7 @@
         <label class="f" for="pCut">Printed cutoff<input id="pCut" inputmode="decimal" value="${draft.printed?.cutoff ?? ""}"></label>
         <label class="f" for="pForm">Printed formula<input id="pForm" value="${esc(draft.printed?.formula || "")}" placeholder="${esc(a.readerProgram?.text || "")}"></label>
         <label class="f" for="pGrey">Grey zone on slip<input id="pGrey" value="${esc(draft.printed?.greyZone || "")}" placeholder="NO"></label></div>` : ""}
+      ${controlsHTML(a)}
       <div class="tbl tall"><table class="data edit"><thead><tr><th class="l">Well</th><th class="l">Role</th><th class="l">OD</th>
         ${showPrinted ? '<th class="l">Printed ratio</th><th class="l">Flag</th>' : ""}<th class="l">Lab no.</th><th class="l">Register OD</th><th class="l">Register ${a.units ? "units" : "ratio"}</th><th>Unclear</th><th class="l">Check</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div>`;
@@ -349,12 +355,14 @@
     set("#fDate", "date"); set("#fLot", "kitLot"); set("#fTest", "testNo"); set("#fNotes", "notes");
     $("#fAssay").onchange = e => {
       draft.assayId = e.target.value;
-      if (!draft.rolesTouched && draft.format !== "lisascan") draft.wells = P.applyLayout(draft.wells, a().layout);
+      if (!draft.rolesTouched && draft.format !== "lisascan") defaultRoles(false);
       saveDraft(); renderEditor(draft.id);
     };
     const clr = $("#clearDraft");
     if (clr) clr.onclick = () => { draft = newDraft(null); try { localStorage.removeItem(DRAFT); } catch (e) { } renderEditor(null); };
     $("#photo").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) openPhoto(f); };
+    $("#photoCam").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) openPhoto(f); };
+    $("#scanCam").onclick = openCamera;
     $("#showPaste").onclick = () => { $("#pasteArea").hidden = false; $("#pasteText").focus(); };
     $("#hidePaste").onclick = () => { $("#pasteArea").hidden = true; };
     $("#readPaste").onclick = () => { ingest(P.parse($("#pasteText").value, { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout })); $("#pasteArea").hidden = true; $("#pasteText").value = ""; };
@@ -374,7 +382,7 @@
         const tr = e.target.closest("tr"); if (!tr) return;
         const w = draft.wells[+tr.dataset.i], k = e.target.dataset.k; if (!w || !k) return;
         if (k === "uncertain") w.uncertain = e.target.checked || undefined;
-        else if (k === "role") { w.role = e.target.value; draft.rolesTouched = true; }
+        else if (k === "role") { w.role = e.target.value; draft.rolesTouched = true; ctrlFromRoles(); }
         else if (k === "pos") w.pos = e.target.value.trim().toUpperCase();
         else if (["od", "printedRatio", "regOD", "regUnits"].includes(k)) { w[k] = numOrNull(e.target.value); if (k === "od") { delete w.missing; delete w.labelMismatch; delete w.checkOrder; } }
         else w[k] = e.target.value.trim() || undefined;
@@ -386,7 +394,34 @@
       });
     }
     const lay = $("#applyLayout");
-    if (lay) lay.onclick = () => { draft.wells = P.applyLayout(draft.wells, byId[draft.assayId].layout); draft.rolesTouched = false; renderReview(); toast("Controls marked in the usual positions"); };
+    if (lay) lay.onclick = () => { defaultRoles(true); renderReview(); toast("Controls marked in the usual positions"); };
+    const ct = $("#ctrlTable tbody");
+    if (ct) {
+      ct.addEventListener("change", e => {
+        const tr = e.target.closest("tr[data-c]"); if (!tr) return;
+        const r = draft.ctrl[+tr.dataset.c], k = e.target.dataset.ck; if (!r || !k) return;
+        if (k === "confirmed") r.confirmed = e.target.checked;
+        else if (k === "pos") { r.pos = e.target.value.trim().toUpperCase(); r.confirmed = false; }
+        else if (k === "od") { r.od = e.target.value.trim(); r.confirmed = false; }
+        else r[k] = e.target.value;
+        syncControls(); renderReview();
+      });
+      ct.addEventListener("click", e => { const b = e.target.closest("[data-cdel]"); if (!b) return; draft.ctrl.splice(+b.dataset.cdel, 1); syncControls(); renderReview(); });
+    }
+    const cadd = $("#ctrlAdd");
+    if (cadd) cadd.onclick = () => { (draft.ctrl = draft.ctrl || []).push({ role: draft.ctrl.some(r => r.role === "NC") ? "PC" : "NC", pos: "", od: "", confirmed: false }); renderReview(); };
+    const nopc = $("#cNoPC");
+    if (nopc) nopc.onchange = e => {
+      draft.pcNotRun = e.target.checked;
+      if (draft.pcNotRun) {
+        // no PC on this plate: the well marked PC was a sample or nothing; drop empty placeholder rows
+        draft.wells = draft.wells.filter(w => !(w.role === "PC" && w.ctrlPlaceholder && numOrNull(w.od) == null));
+        draft.wells.forEach(w => { if (w.role === "PC") { if (w.ctrlTyped) { w.od = w.readOd; delete w.ctrlTyped; delete w.readOd; } w.role = "S"; } });
+        draft.ctrl = (draft.ctrl || []).filter(r => r.role !== "PC");
+        draft.rolesTouched = true;
+      }
+      renderReview();
+    };
     const add = $("#addRow");
     if (add) add.onclick = () => { draft.wells.push({ pos: nextPos(), od: null, role: "S" }); renderReview(); };
     const ex = $("#fExpected");
@@ -413,8 +448,135 @@
     const nc = $(".note-cell", tr); if (nc) nc.textContent = notes.join("; ");
   }
 
+  /* Control wells: the user states where controls were placed. Defaults come from the last saved run of
+     the same assay (the same pattern: last wells, first wells, or fixed wells), else the kit's usual layout. */
+  /* ---------- Control wells (option A): one row per control, with well and OD typed from the slip ----------
+     The typed OD is what the calculation uses. It is compared with what was read for that well; a difference
+     must be corrected or confirmed before saving. The value is also looked for in other wells (a misread well
+     label), and checked against the insert limit and this lot's history. */
+  const CTRL_ROLES = ["NC", "PC", "BLK"];
+  const same4 = (x, y) => x != null && y != null && Math.abs(Number(x) - Number(y)) < 0.00006;
+  function ctrlFromRoles() {
+    const prev = new Map((draft.ctrl || []).map(r => [r.role + "@" + r.pos, r]));
+    draft.ctrl = draft.wells.filter(w => w.role !== "S").sort((x, y) => E.posIndex(x.pos) - E.posIndex(y.pos))
+      .map(w => {
+        const p = prev.get(w.role + "@" + w.pos);
+        if (p) return { role: w.role, pos: w.pos, od: p.od, confirmed: p.confirmed };
+        // a saved run being edited: its controls were already typed and checked
+        if (w.ctrlTyped) return { role: w.role, pos: w.pos, od: String(w.od ?? ""), confirmed: !same4(w.readOd, w.od) };
+        return { role: w.role, pos: w.pos, od: "", confirmed: false };
+      });
+  }
+  function syncControls() {
+    const rows = (draft.ctrl || []).filter(r => E.isPos(r.pos));
+    const want = new Map(rows.map(r => [r.pos, r]));
+    draft.wells.forEach(w => {
+      const r = want.get(w.pos);
+      if (!r) { if (w.ctrlTyped) { w.od = w.readOd; delete w.ctrlTyped; delete w.readOd; } if (w.role !== "S") w.role = "S"; return; }
+      w.role = r.role;
+    });
+    rows.forEach(r => { if (!draft.wells.some(w => w.pos === r.pos)) draft.wells.push({ pos: r.pos, od: null, role: r.role, missing: true, ctrlPlaceholder: true }); });
+    // drop empty placeholder rows no longer listed as controls
+    draft.wells = draft.wells.filter(w => !(w.ctrlPlaceholder && !want.has(w.pos) && numOrNull(w.od) == null && !w.ctrlTyped));
+    draft.wells.forEach(w => {
+      const r = want.get(w.pos); if (!r) return;
+      const typed = numOrNull(r.od);
+      if (typed != null) { if (!w.ctrlTyped) { w.readOd = numOrNull(w.od); w.ctrlTyped = true; } w.od = typed; delete w.missing; }
+      else if (w.ctrlTyped) { w.od = w.readOd; delete w.ctrlTyped; delete w.readOd; }
+    });
+    draft.wells.sort((x, y) => E.posIndex(x.pos) - E.posIndex(y.pos));
+    if (rows.some(r => r.role === "PC")) draft.pcNotRun = false;
+    draft.rolesTouched = true;
+  }
+  function lotHistory(role) {
+    const vals = [];
+    runs.filter(r => r.assayId === draft.assayId && r.id !== draft.id && (!draft.kitLot || !r.kitLot || r.kitLot === draft.kitLot))
+      .forEach(r => (r.wells || []).forEach(w => { if (w.role === role && numOrNull(w.od) != null) vals.push(Number(w.od)); }));
+    if (vals.length < 5) return null;
+    const m = vals.reduce((t, v) => t + v, 0) / vals.length, sd = Math.sqrt(vals.reduce((t, v) => t + (v - m) ** 2, 0) / (vals.length - 1));
+    return { m, sd, n: vals.length };
+  }
+  function ctrlChecks(a) {
+    return (draft.ctrl || []).map((r, i) => {
+      const out = { i, status: "", text: "", block: false };
+      if (!r.pos) { out.status = "warn"; out.text = "Enter the well"; out.block = true; return out; }
+      if (!E.isPos(r.pos)) { out.status = "bad"; out.text = `${r.pos} is not a well (A1 to H12)`; out.block = true; return out; }
+      const w = draft.wells.find(x => x.pos === r.pos);
+      const read = w ? (w.ctrlTyped ? w.readOd : numOrNull(w.od)) : null;
+      const typed = numOrNull(r.od);
+      const msgs = [];
+      if (typed == null) { out.status = "warn"; out.text = read != null ? `Type the OD from the slip (read as ${read})` : "Type the OD from the slip"; out.block = true; return out; }
+      if (read == null) msgs.push({ s: "ok", t: `Not read from the slip; your value is used` });
+      else if (same4(read, typed)) msgs.push({ s: "ok", t: "Matches the slip reading" });
+      else {
+        const elsewhere = draft.wells.filter(x => x.pos !== r.pos && same4(x.ctrlTyped ? x.readOd : x.od, typed)).map(x => x.pos);
+        msgs.push({ s: r.confirmed ? "ok" : "bad", t: `${r.pos} was read as ${read}` + (elsewhere.length ? `; ${typed} was read in ${elsewhere.join(", ")}. Check the well` : "") + (r.confirmed ? " (confirmed: slip shows the typed value)" : "") });
+        if (!r.confirmed) out.block = true, out.mismatch = true;
+      }
+      // insert limit for a single control value
+      (a.validity || []).filter(v => v.ctrl === r.role && typeof v.value === "number" && !/ref/.test(v.op)).forEach(v => {
+        const ok = v.op === "<" ? typed < v.value : v.op === "<=" ? typed <= v.value : v.op === ">" ? typed > v.value : v.op === ">=" ? typed >= v.value : true;
+        if (!ok) msgs.push({ s: "warn", t: r.role === "PC" ? `Below the insert limit (${v.text}): is this really the PC well?` : `Outside the insert limit (${v.text})` });
+      });
+      const h = lotHistory(r.role);
+      if (h && h.sd > 0 && Math.abs(typed - h.m) > 3 * h.sd) msgs.push({ s: "warn", t: `Unusual for this ${draft.kitLot ? "lot" : "assay"} (usual ${h.m.toFixed(3)} ± ${(3 * h.sd).toFixed(3)}, ${h.n} runs): check the well` });
+      out.status = msgs.some(m => m.s === "bad") ? "bad" : msgs.some(m => m.s === "warn") ? "warn" : "ok";
+      out.text = msgs.map(m => m.t).join(". ");
+      return out;
+    });
+  }
+  function controlsHTML(a) {
+    if (!draft.ctrl) ctrlFromRoles();
+    const checks = ctrlChecks(a);
+    const icon = st => st === "ok" ? "✔" : st === "bad" ? "✘" : "!";
+    const rows = (draft.ctrl || []).map((r, i) => {
+      const c = checks[i];
+      return `<tr class="${c.status === "bad" ? "missing" : c.status === "warn" ? "flag" : ""}" data-c="${i}">
+        <td><select data-ck="role" aria-label="Control">${CTRL_ROLES.map(x => `<option value="${x}" ${r.role === x ? "selected" : ""}>${x === "BLK" ? "Blank" : x}</option>`).join("")}</select></td>
+        <td><input data-ck="pos" value="${esc(r.pos)}" size="4" placeholder="E4" aria-label="Well"></td>
+        <td><input data-ck="od" inputmode="decimal" value="${esc(r.od ?? "")}" placeholder="from slip" aria-label="OD from slip"></td>
+        <td class="t"><span class="${c.status === "ok" ? "st-ok" : c.status === "bad" ? "st-bad" : "st-warn"}">${icon(c.status)}</span> ${esc(c.text)}
+          ${c.mismatch || r.confirmed ? `<label class="note" style="display:block;margin-top:4px"><input type="checkbox" data-ck="confirmed" ${r.confirmed ? "checked" : ""} style="width:auto"> The slip shows ${esc(r.od)} for ${esc(r.pos)}</label>` : ""}</td>
+        <td><button class="btn small" data-cdel="${i}" aria-label="Remove control">×</button></td></tr>`;
+    }).join("");
+    const blocking = checks.filter(c => c.block).length;
+    return `<div class="row between" style="margin-top:14px"><h3>Controls on this plate</h3>
+        <div class="row"><button class="btn small" id="ctrlAdd">Add control</button></div></div>
+      <p class="note">For each control, check the well and type its OD from the slip. The typed OD is used for the calculation and checked against what was read. ${draft.format === "lisascan" ? "Wells come from the control lines printed on the slip." : (prefs.ctrlPat && prefs.ctrlPat[draft.assayId] ? `Wells are filled in as on your last ${esc(a.name)} run.` : "Wells are filled in from the kit's usual layout.")}</p>
+      <div class="tbl"><table class="data edit" id="ctrlTable"><thead><tr><th class="l">Control</th><th class="l">Well</th><th class="l">OD from slip</th><th class="l">Check</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="note">No controls entered. Add the NC and PC wells.</td></tr>`}</tbody></table></div>
+      <div class="row" style="margin:6px 0 12px"><label class="note" for="cNoPC"><input type="checkbox" id="cNoPC" ${draft.pcNotRun ? "checked" : ""} style="width:auto"> PC not run on this plate</label>
+        <span class="note ${blocking ? "st-warn" : "st-ok"}">${blocking ? `${blocking} control${blocking > 1 ? "s" : ""} to complete before saving` : (draft.ctrl || []).length ? "Controls checked" : ""}</span></div>`;
+  }
+  function defaultRoles(force) {
+    if (draft.format === "lisascan" && !force) return;
+    const pat = prefs.ctrlPat && prefs.ctrlPat[draft.assayId];
+    if (pat && pat.where === "fixed") {
+      const m = new Map(pat.wells.map(x => [x.pos, x.role]));
+      draft.wells = draft.wells.map(w => ({ ...w, role: m.get(w.pos) || "S" }));
+    } else {
+      draft.wells = P.applyLayout(draft.wells, pat || byId[draft.assayId].layout);
+    }
+    draft.rolesTouched = false;
+    ctrlFromRoles();
+  }
+  function rememberControls(run) {
+    if (draft.format === "lisascan") return;
+    const ws = run.wells.slice().sort((x, y) => E.posIndex(x.pos) - E.posIndex(y.pos));
+    const ctrl = ws.map((w, i) => ({ i, w })).filter(x => x.w.role !== "S");
+    // a plate run without a PC is an exception; do not make it the pattern for later runs
+    if (!ctrl.length || run.pcNotRun || !ctrl.some(x => x.w.role === "PC")) return;
+    const k = ctrl.length, n = ws.length;
+    let pat;
+    if (ctrl.every((x, j) => x.i === n - k + j)) pat = { where: "end", order: ctrl.map(x => x.w.role) };
+    else if (ctrl.every((x, j) => x.i === j)) pat = { where: "start", order: ctrl.map(x => x.w.role) };
+    else pat = { where: "fixed", wells: ctrl.map(x => ({ pos: x.w.pos, role: x.w.role })) };
+    prefs.ctrlPat = { ...(prefs.ctrlPat || {}), [run.assayId]: pat };
+    savePrefs();
+  }
+
   function autoRoles() {
-    if (!draft.rolesTouched && draft.format !== "lisascan") draft.wells = P.applyLayout(draft.wells, byId[draft.assayId].layout);
+    if (!draft.rolesTouched && draft.format !== "lisascan") defaultRoles(false);
   }
 
   function ingest(parsed) {
@@ -440,6 +602,7 @@
     draft.wells = draft.wells.filter(w => !incoming.has(w.pos)).concat(parsed.wells)
       .sort((x, y) => E.posIndex(x.pos) - E.posIndex(y.pos));
     if (parsed.format !== "lisascan") autoRoles();
+    ctrlFromRoles();
     renderReview();
     const unsure = parsed.wells.filter(w => w.uncertain || w.missing || w.labelMismatch).length;
     toast(`Read ${parsed.wells.length} wells${unsure ? `, ${unsure} to check` : ""}`);
@@ -452,15 +615,75 @@
     const area = $("#photoArea");
     area.hidden = false;
     area.innerHTML = `<p class="note">Opening photo…</p>`;
-    try { shot = { canvas: await O.loadImage(file), crop: null }; }
+    let canvas;
+    try { canvas = await O.loadImage(file); }
     catch (e) { area.innerHTML = `<p class="note st-bad">${esc(e.message)}</p>`; return; }
+    openCanvas(canvas);
+  }
+  /* A photo (from the camera or a file) is scanned like a document scanner app: when one clear slip is
+     found it is straightened and the light evened out (this read best in tests); otherwise the photo is
+     used as it is, with the slip boxed automatically. Either view can be chosen. */
+  function openCanvas(canvas) {
+    $("#photoArea").hidden = false;
+    let sc = null;
+    try { sc = O.scan(canvas, { evenLight: true }); } catch (e) { sc = null; }
+    let crop = null; try { crop = O.autoCrop(canvas); } catch (e) { crop = null; }
+    const original = { canvas, crop, auto: !!crop };
+    if (sc && !sc.skipped && sc.canvas) shot = { canvas: sc.canvas, crop: null, auto: false, scanned: true, original, scan: sc.canvas };
+    else shot = { ...original, scanned: false, original, scan: null };
     drawShot();
+  }
+
+  /* In-app camera: live view from the rear camera with a frame to fit the slip in. Falls back to the
+     phone's own camera screen where live camera access is not available. Nothing leaves the device. */
+  async function openCamera() {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { $("#photoCam").click(); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false }); }
+    catch (e) { toast("Camera not available here. Opening the phone's camera instead."); $("#photoCam").click(); return; }
+    const ov = document.createElement("div");
+    ov.id = "camOverlay";
+    ov.setAttribute("role", "dialog"); ov.setAttribute("aria-label", "Scan slip with camera");
+    ov.style.cssText = "position:fixed;inset:0;z-index:1000;background:#000;display:flex;flex-direction:column;";
+    ov.innerHTML = `<div style="position:relative;flex:1;overflow:hidden">
+        <video playsinline muted autoplay style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video>
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(70vw,60vh);height:88%;border:3px dashed rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35);pointer-events:none"></div>
+        <p style="position:absolute;left:0;right:0;top:8px;margin:0;text-align:center;color:#fff;font:600 15px system-ui;text-shadow:0 1px 3px #000">Fit the slip inside the frame, flat, without shadow. Strips can be side by side.</p>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:center;align-items:center;padding:12px;background:#111">
+        <button class="btn" id="camCancel" style="background:transparent;color:#fff;border-color:#888">Cancel</button>
+        <button class="btn primary" id="camShoot" style="min-width:140px;font-size:17px">Capture</button>
+        <button class="btn" id="camTorch" hidden style="background:transparent;color:#fff;border-color:#888">Light</button>
+      </div>`;
+    document.body.appendChild(ov);
+    const video = ov.querySelector("video");
+    video.srcObject = stream;
+    const track = stream.getVideoTracks()[0];
+    const stop = () => { stream.getTracks().forEach(t => t.stop()); ov.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = e => { if (e.key === "Escape") stop(); };
+    document.addEventListener("keydown", onKey);
+    try { const caps = track.getCapabilities ? track.getCapabilities() : {}; if (caps.torch) { const tb = ov.querySelector("#camTorch"); tb.hidden = false; let on = false; tb.onclick = () => { on = !on; track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => { }); tb.textContent = on ? "Light off" : "Light"; }; } } catch (e) { }
+    ov.querySelector("#camCancel").onclick = stop;
+    ov.querySelector("#camShoot").onclick = async () => {
+      if (!video.videoWidth) { toast("The camera is still starting. Try again in a moment."); return; }
+      let canvas = document.createElement("canvas");
+      try {
+        // full camera resolution where the browser supports still photos
+        if (window.ImageCapture) { const bmp = await new ImageCapture(track).takePhoto().then(b => createImageBitmap(b)); canvas.width = bmp.width; canvas.height = bmp.height; canvas.getContext("2d").drawImage(bmp, 0, 0); }
+        else throw new Error("no ImageCapture");
+      } catch (e) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d").drawImage(video, 0, 0); }
+      const max = 2600, k = Math.min(1, max / Math.max(canvas.width, canvas.height));
+      if (k < 1) { const c2 = document.createElement("canvas"); c2.width = Math.round(canvas.width * k); c2.height = Math.round(canvas.height * k); c2.getContext("2d").drawImage(canvas, 0, 0, c2.width, c2.height); canvas = c2; }
+      stop();
+      openCanvas(canvas);
+    };
   }
   function drawShot() {
     const area = $("#photoArea");
     area.innerHTML = `<div class="stack">
-      <div class="row"><button class="btn small" id="rotL">Rotate left</button><button class="btn small" id="rotR">Rotate right</button><button class="btn small" id="cropClear">Use whole photo</button>
-        <span class="note">Drag across the slip to read only that part.</span></div>
+      <div class="row"><button class="btn small" id="rotL">Rotate left</button><button class="btn small" id="rotR">Rotate right</button>${shot.scanned ? "" : `<button class="btn small" id="cropClear">Use whole photo</button>`}
+        ${shot.scan ? `<button class="btn small" id="scanToggle">${shot.scanned ? "Use original photo" : "Use scanned slip"}</button>` : ""}
+        <span class="note">${shot.scanned ? "Scanned: the slip was found, straightened and the light evened out. Check that no part of the slip is cut off." : shot.auto ? "The slip was found and boxed automatically. Check the box covers the whole slip; drag to redraw it if not." : "Drag across the slip to read only that part."}</span></div>
       <div class="shot" id="shot"><div class="crop" id="cropBox" hidden></div></div>
       <div class="progress" hidden id="ocrProg"><div></div></div>
       <div class="row"><button class="btn primary" id="readPhoto">Read values</button><button class="btn" id="closePhoto">Close photo</button><span class="note" id="ocrMsg"></span></div></div>`;
@@ -484,9 +707,12 @@
     });
     holder.addEventListener("pointerup", () => { start = null; if (shot.crop && (shot.crop.w < 30 || shot.crop.h < 30)) { shot.crop = null; showCrop(); } });
     requestAnimationFrame(showCrop);
-    $("#rotL").onclick = () => { shot = { canvas: O.rotate(shot.canvas, -1), crop: null }; drawShot(); };
-    $("#rotR").onclick = () => { shot = { canvas: O.rotate(shot.canvas, 1), crop: null }; drawShot(); };
-    $("#cropClear").onclick = () => { shot.crop = null; showCrop(); };
+    const turn = dir => { openCanvas(O.rotate(shot.original ? shot.original.canvas : shot.canvas, dir)); };
+    const tg = $("#scanToggle");
+    if (tg) tg.onclick = () => { shot = shot.scanned ? { ...shot.original, scanned: false, original: shot.original, scan: shot.scan } : { canvas: shot.scan, crop: null, auto: false, scanned: true, original: shot.original, scan: shot.scan }; drawShot(); };
+    $("#rotL").onclick = () => turn(-1);
+    $("#rotR").onclick = () => turn(1);
+    const cc = $("#cropClear"); if (cc) cc.onclick = () => { shot.crop = null; showCrop(); };
     $("#closePhoto").onclick = () => { $("#photoArea").hidden = true; shot = null; };
     $("#readPhoto").onclick = async () => {
       const btn = $("#readPhoto"), prog = $("#ocrProg"), msg = $("#ocrMsg");
@@ -495,7 +721,25 @@
         const out = await O.read(shot.canvas, shot.crop, m => {
           if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; msg.textContent = "Reading values…"; }
         });
-        const parsed = P.parse(out.lines, { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout });
+        let opts = { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout };
+        let lines = out.lines;
+        // OD-only slips (well label and OD per line): read again in page-layout mode, which keeps strips
+        // photographed side by side apart, and place values by column and label
+        if (P.detect(out.text) === "merilyzer") {
+          msg.textContent = "Reading the strips…";
+          const out2 = await O.read(shot.canvas, shot.crop, m => {
+            if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; }
+          }, "3");
+          opts.words = out2.words;
+          if ((out2.lines || []).length > lines.length) lines = out2.lines;
+        }
+        const parsed = P.parse(lines, opts);
+        // second reading of doubtful values, each cut out and enlarged on its own
+        const targets = P.rereadTargets(parsed, opts.words ? null : lines);
+        if (targets.length) {
+          msg.textContent = `Checking ${targets.length} doubtful value${targets.length > 1 ? "s" : ""}…`;
+          try { const rr = await O.reread(shot.canvas, shot.crop, targets.map(t => t.word)); P.applyRereads(parsed, targets, rr); } catch (e) { /* keep the first reading */ }
+        }
         $("#photoArea").hidden = true; shot = null;
         ingest(parsed);
       } catch (e) {
@@ -509,15 +753,20 @@
     const a = byId[draft.assayId], msg = $("#saveMsg");
     const ev = E.evaluate(draft, a);
     if (!draft.date) { msg.textContent = "Enter the run date."; $("#fDate").focus(); return; }
-    if (!draft.wells.some(w => w.role === a.cutoff.base)) { msg.textContent = `Mark the ${a.cutoff.base} well${a.cutoff.base === "NC" ? "s" : ""} before saving.`; return; }
+    const cc = draft.ctrl && draft.ctrl.length ? ctrlChecks(a) : [];
+    if (cc.some(c => c.block)) { msg.textContent = "Complete the controls first: type each control's OD from the slip, and correct or confirm any that differ from the reading."; $("#ctrlTable") && $("#ctrlTable").scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    if (!draft.wells.some(w => w.role === a.cutoff.base)) { msg.textContent = `Enter the ${a.cutoff.base} well${a.cutoff.base === "NC" ? "s" : ""} under Control wells before saving.`; return; }
     if (!ev.samples.length) { msg.textContent = "There are no sample wells yet."; return; }
     const run = {
       id: draft.id || `${draft.assayId}_${draft.date}_${Date.now().toString(36)}`,
       assayId: draft.assayId, date: draft.date, kitLot: draft.kitLot.trim(), testNo: numOrNull(draft.testNo),
       printed: draft.printed && draft.printed.cutoff != null ? draft.printed : null,
-      wells: draft.wells.map(w => { const o = { ...w }; delete o.conf; delete o.raw; delete o.checkOrder; delete o.labelMismatch; delete o.missing; return o; }),
-      notes: draft.notes.trim(), source: draft.source || "Entered in ELI-Check", savedAt: new Date().toISOString()
+      wells: draft.wells.map(w => { const o = { ...w }; delete o.conf; delete o.raw; delete o.checkOrder; delete o.labelMismatch; delete o.missing; delete o.ctrlPlaceholder; return o; }),
+      notes: draft.notes.trim(), source: draft.source || "Entered in ELI-Check", savedAt: new Date().toISOString(),
+      pcNotRun: draft.pcNotRun || undefined,
+      ctrlCheck: (draft.ctrl || []).length ? draft.ctrl.map(r => { const w = draft.wells.find(x => x.pos === r.pos); return { role: r.role, pos: r.pos, typed: numOrNull(r.od), read: w ? (w.ctrlTyped ? w.readOd : numOrNull(w.od)) : null, confirmed: !!r.confirmed }; }) : undefined
     };
+    rememberControls(run);
     const i = runs.findIndex(r => r.id === run.id);
     if (i >= 0) runs[i] = run; else runs.push(run);
     saveRuns();
