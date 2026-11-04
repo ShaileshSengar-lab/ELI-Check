@@ -209,3 +209,7 @@ details > summary { cursor: pointer; font-weight: 650; }
   .report h2 { break-after: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* positive samples in the review table */
+table.data tr.pos td { background: var(--bad-soft); }
+table.data tr.pos.flag td { background: color-mix(in srgb, var(--bad-soft) 60%, var(--warn-soft)); }
