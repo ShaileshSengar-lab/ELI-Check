@@ -1,5 +1,24 @@
 # Changes
 
+## v1.4.2 (4 November 2026)
+- A new photo or text no longer mixes silently with values already in the run. If the run holds values
+  from an earlier slip, the app asks: "New slip: replace the earlier values" or "Next strip of the same
+  slip: add after them". Previously a new slip was added after an unsaved earlier one, so values from an
+  old slip appeared with the new one.
+- When the app reopens with an unsaved run from earlier, a note says so, with its time and well count,
+  and points to Start over.
+
+## v1.4.1 (4 November 2026)
+- Fixed: values typed or corrected in the well table (OD, role, Unclear, delete) were not taken up since
+  v1.3.8, because the new controls table sat above it. They are taken up again, at once.
+- The well table now shows each sample's calculated value from the insert (S/CO, or IgM units for scrub
+  typhus) and its result (Negative, Equivocal, Positive, Reactive, Grey zone). Positive and reactive
+  samples are shaded red, equivocal ones amber. Without controls it says "needs controls"; on an invalid
+  run results are marked "(run invalid)".
+- Recalculate button: refreshes the controls, every sample result and the run summary after controls or
+  hard-to-read values have been corrected, and jumps to the result.
+- Lab no. and register columns are hidden by default; "Compare with register" shows them when needed.
+
 ## v1.4.0 (4 November 2026)
 - Scan with camera: a live view from the rear camera with a frame to fit the slip in, a Capture button,
   and a light (torch) button where the phone supports it. Where live camera access is not available, the
@@ -91,4 +110,3 @@ First public release as ELI-Check (Ensuring Laboratory Integrity).
 - Monthly IQC report for printing or saving as PDF, with signature blocks.
 - Audit summary, CSV export, and backup and restore of all runs on a device.
 - Works offline after the first visit and can be added to a phone's home screen.
-  
