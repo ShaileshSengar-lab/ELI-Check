@@ -1,5 +1,5 @@
 /* Keeps the app working offline once it has been opened. Bump VERSION after changing any file. */
-const VERSION = "erc-v1.3.2";
+const VERSION = "erc-v1.3.3";
 const CORE = [
   "./", "index.html", "css/app.css", "js/assays.js", "js/engine.js", "js/parse.js", "js/ocr.js", "js/app.js",
   "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"
