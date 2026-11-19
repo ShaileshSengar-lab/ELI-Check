@@ -342,6 +342,7 @@
       res.samples.push({ n, od, ratio, flag, conf, raw, uncertain, estimated });
     }
     resolveControls(res, layout);
+    checkFormula(res);
     res.samples = numberSamples(res.samples);
     return res;
   }
@@ -397,6 +398,36 @@
       const ncs = res.controls.filter(c => c.role === "NC").map(c => c.od);
       if (ncs.length) { const m = ncs.reduce((t, v) => t + v, 0) / ncs.length; if (Math.abs(m - expected) > Math.max(0.0006, expected * 0.1)) res.controls.forEach(c => { if (c.role === "NC") c.conf = Math.min(c.conf, 50); }); }
     }
+  }
+
+  /* The printed formula's operator can be misread ("*" read as "+"). The slip's own controls and printed
+     cutoff decide: if the other operator reproduces the printed cutoff, it is used. The cutoff worked out
+     from the controls (unrounded) is then used to check every sample's OD against its printed ratio more
+     tightly than the rounded printed cutoff allows, so a single misread digit in a small OD is flagged. */
+  function checkFormula(res) {
+    const pf = res.printed;
+    if (!pf || !(pf.cutoff > 0) || !pf.formula) return;
+    const f = pf.formula.replace(/\s+/g, "");
+    const base = /PC/i.test(f) ? "PC" : "NC";
+    const vals = res.controls.filter(c => c.role === base).map(c => c.od).filter(v => v != null);
+    if (!vals.length) return;
+    const m = vals.reduce((t, v) => t + v, 0) / vals.length;
+    const k = f.match(/(\d*\.\d+|\d+)/g);
+    if (!k) return;
+    const kv = parseFloat(k[k.length - 1]);
+    const add = m + kv, mul = m * kv;
+    const close = v => Math.abs(v - pf.cutoff) <= Math.max(0.0001, pf.cutoff * 0.006);
+    const isAdd = /\+/.test(f), isMul = /[*x×]/i.test(f);
+    if (isAdd && !close(add) && close(mul)) { pf.formula = pf.formula.replace("+", "*"); pf.operatorFixed = true; }
+    else if (isMul && !close(mul) && close(add)) { pf.formula = pf.formula.replace(/[*x×]/i, "+"); pf.operatorFixed = true; }
+    const calc = /\*/.test(pf.formula) ? mul : add;
+    if (!close(calc)) return;
+    pf.calcCutoff = calc;
+    res.samples.forEach(s => {
+      if (s.od == null || s.ratio == null || s.estimated) return;
+      const est = s.ratio * calc;
+      if (Math.abs(s.od - est) > 0.00006 + est * 0.003) s.uncertain = true;
+    });
   }
 
   /* Sample numbers. Numbers read from the slip that rise in order act as anchors (longest increasing run);
@@ -517,7 +548,8 @@
     return out;
   }
   function applyRereads(parsed, targets, results) {
-    const cut = parsed.printed && parsed.printed.cutoff > 0 ? parsed.printed.cutoff : null;
+    const cut = parsed.printed && parsed.printed.cutoff > 0 ? (parsed.printed.calcCutoff || parsed.printed.cutoff) : null;
+    const tight = !!(parsed.printed && parsed.printed.calcCutoff);
     const alt = new Map();
     targets.forEach((t, i) => {
       const r = results[i]; if (!r || !r.text) return;
@@ -532,7 +564,7 @@
       if (cut && w.printedRatio != null && w.role === "S") {
         const ods = [w.od, a.od].filter(x => x != null), rats = [w.printedRatio, a.ratio].filter(x => x != null);
         let best = null;
-        ods.forEach(o => rats.forEach(r => { const e = r * cut, d = Math.abs(o - e); if (d <= Math.max(0.00015, e * 0.012) && (!best || d < best.d)) best = { o, r, d }; }));
+        ods.forEach(o => rats.forEach(r => { const e = r * cut, d = Math.abs(o - e); if (d <= (tight ? 0.00006 + e * 0.003 : Math.max(0.00015, e * 0.012)) && (!best || d < best.d)) best = { o, r, d }; }));
         if (best) { if (best.o !== w.od || best.r !== w.printedRatio) w.rereadFixed = true; w.od = best.o; w.printedRatio = best.r; w.uncertain = undefined; w.rereadOk = true; }
         else if (a.od != null && a.od !== w.od) w.rereadAlt = a.od;
         return;

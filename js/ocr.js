@@ -147,10 +147,24 @@
     };
     const col = new Float32Array(w);
     for (let x = 0; x < w; x++) { let n = 0; for (let y = 0; y < h; y++) n += white[y * w + x]; col[x] = n / h; }
-    const [x0, x1] = longestRun(col, 0.3, Math.round(w * 0.02));
+    let [x0, x1] = longestRun(col, 0.3, Math.round(w * 0.02));
     const row = new Float32Array(h);
     for (let y = 0; y < h; y++) { let n = 0; for (let x = x0; x <= x1; x++) n += white[y * w + x]; row[y] = n / Math.max(1, x1 - x0 + 1); }
-    const [y0, y1] = longestRun(row, 0.3, Math.round(h * 0.06));
+    let [y0, y1] = longestRun(row, 0.3, Math.round(h * 0.06));
+    // In shade or warm light the slip stops looking white, though it stays more neutral than the paper
+    // beside it. Extend the box downwards (where shade usually falls) while the slip's columns stay clearly less coloured than the
+    // rest of that row.
+    if (x1 > x0 && x1 - x0 < w * 0.8) {
+      const satRow = (y, xa, xb) => { let t = 0, n = 0; for (let x = xa; x <= xb; x++) { const i = (y * w + x) * 4; t += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]); n++; } return n ? t / n : 0; };
+      const slipLike = y => {
+        const band = satRow(y, x0, x1);
+        const outN = (x0) + (w - 1 - x1);
+        const out = outN ? (satRow(y, 0, x0 - 1) * x0 + satRow(y, x1 + 1, w - 1) * (w - 1 - x1)) / outN : Infinity;
+        return band < out * 0.85 && band < 70;
+      };
+      const smooth = (y, dir) => { let k = 0; for (let j = 0; j < 3; j++) { const yy = y + dir * j; if (yy >= 0 && yy < h && slipLike(yy)) k++; } return k >= 2; };
+      while (y1 < h - 1 && smooth(y1 + 1, 1)) y1++;
+    }
     const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
     if (cw < w * 0.08 || ch < h * 0.15) return null;            // nothing slip-like found
     if (cw * ch > w * h * 0.6) return null;                       // slips already fill most of the photo: read it all
