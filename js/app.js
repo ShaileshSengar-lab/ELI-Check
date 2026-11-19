@@ -767,28 +767,38 @@
     $("#readPhoto").onclick = async () => {
       const btn = $("#readPhoto"), prog = $("#ocrProg"), msg = $("#ocrMsg");
       btn.disabled = true; prog.hidden = false; msg.textContent = "Preparing text recognition (first time takes a little longer)…";
-      try {
-        const out = await O.read(shot.canvas, shot.crop, m => {
-          if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; msg.textContent = "Reading values…"; }
-        });
-        let opts = { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout };
+      const onProg = m => { if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; } };
+      // one complete reading of an image: text, layout-mode second pass for OD-only slips, and parsing
+      const readOnce = async (canvas, crop) => {
+        const out = await O.read(canvas, crop, m => { onProg(m); if (m.status === "recognizing text") msg.textContent = "Reading values…"; });
+        const opts = { startPos: $("#startPos").value || "A1", layout: byId[draft.assayId].layout };
         let lines = out.lines;
         // OD-only slips (well label and OD per line): read again in page-layout mode, which keeps strips
         // photographed side by side apart, and place values by column and label
         if (P.detect(out.text) === "merilyzer") {
           msg.textContent = "Reading the strips…";
-          const out2 = await O.read(shot.canvas, shot.crop, m => {
-            if (m.status === "recognizing text") { prog.firstElementChild.style.width = Math.round(m.progress * 100) + "%"; }
-          }, "3");
+          const out2 = await O.read(canvas, crop, onProg, "3");
           opts.words = out2.words;
           if ((out2.lines || []).length > lines.length) lines = out2.lines;
         }
-        const parsed = P.parse(lines, opts);
+        return { parsed: P.parse(lines, opts), lines, opts, canvas, crop };
+      };
+      // how good a reading is: values found, counting doubtful ones as half
+      const score = r => r.parsed.wells.reduce((t, w) => t + (w.od == null ? 0 : w.uncertain ? 0.5 : 1), 0);
+      try {
+        let best = await readOnce(shot.canvas, shot.crop);
+        // a scanned (straightened) slip is also read as photographed, and the better reading is kept:
+        // straightening helps most slips but can distort one that is curled or partly in shade
+        if (shot.scanned && shot.original) {
+          msg.textContent = "Comparing with the original photo…";
+          try { const alt = await readOnce(shot.original.canvas, shot.original.crop); if (score(alt) > score(best)) best = alt; } catch (e) { /* keep the scanned reading */ }
+        }
+        const { parsed, lines, opts } = best;
         // second reading of doubtful values, each cut out and enlarged on its own
         const targets = P.rereadTargets(parsed, opts.words ? null : lines);
         if (targets.length) {
           msg.textContent = `Checking ${targets.length} doubtful value${targets.length > 1 ? "s" : ""}…`;
-          try { const rr = await O.reread(shot.canvas, shot.crop, targets.map(t => t.word)); P.applyRereads(parsed, targets, rr); } catch (e) { /* keep the first reading */ }
+          try { const rr = await O.reread(best.canvas, best.crop, targets.map(t => t.word)); P.applyRereads(parsed, targets, rr); } catch (e) { /* keep the first reading */ }
         }
         $("#photoArea").hidden = true; shot = null;
         ingest(parsed);
