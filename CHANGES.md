@@ -1,5 +1,11 @@
 # Changes
 
+## v1.4.4 (19 November 2026)
+- A straightened (scanned) slip is also read as photographed, and the reading that finds more values,
+  with fewer doubtful ones, is kept. Straightening helps most slips but distorted one HAV slip (9 Nov),
+  where it found 1 of 10 samples; with both readings compared, 9 of 10 are read correctly and the tenth
+  is flagged. Other test slips read exactly as before. Adds a few seconds when a slip is scanned.
+
 ## v1.4.3 (19 November 2026)
 - Printed cutoff formula: when the operator is misread (for example "mNC * 2.1" read as "mNC + 2.1"),
   the slip's own controls and printed cutoff decide which operator is right, and it is corrected.
