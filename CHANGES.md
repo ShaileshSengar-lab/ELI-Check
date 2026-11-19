@@ -1,5 +1,14 @@
 # Changes
 
+## v1.4.3 (19 November 2026)
+- Printed cutoff formula: when the operator is misread (for example "mNC * 2.1" read as "mNC + 2.1"),
+  the slip's own controls and printed cutoff decide which operator is right, and it is corrected.
+- Sample ODs on Erba LisaScan slips are checked against printed ratio × the cutoff worked out from the
+  slip's controls (unrounded), with a much tighter allowance. A single misread digit in a small OD (for
+  example 0.0028 read for 0.0029 on a HAV slip, cutoff 0.0178) is now flagged instead of passing.
+- The automatic slip box follows the slip down into shade, where it no longer looks white but is still
+  less coloured than the paper beside it.
+
 ## v1.4.2 (4 November 2026)
 - A new photo or text no longer mixes silently with values already in the run. If the run holds values
   from an earlier slip, the app asks: "New slip: replace the earlier values" or "Next strip of the same
