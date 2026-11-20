@@ -1,5 +1,32 @@
 # Changes
 
+## v1.4.7 (20 November 2026)
+- Theme button in the header: Auto (follows the device), Light or Dark, remembered on each device.
+- Rows to check are marked with a thin amber bar and amber note instead of shading the whole row; empty
+  rows get a red bar. Positive samples stay red.
+- Dark theme: a lighter slate teal background and brighter teal buttons.
+- Brand yellow from the logo: logo wells, the current section and the Read values button. QC flags stay
+  amber and red.
+
+## v1.4.6 (20 November 2026)
+- Strips laid side by side on a register: the register paper and handwriting are hidden, each strip is
+  found and read on its own, and strips continue from one to the next. Each value is checked against a
+  second reading; values that differ or could not be confirmed are marked to check.
+- Straightening is skipped when the area found runs to the edge of the photo or is far from rectangular
+  (the register page, not the slip), which had bent the strips and moved labels away from their values.
+- Slips listing well, OD and role (SMP, NC, PC, Blank) are read as well lists, and the roles on the slip
+  set the controls.
+- A well whose value cannot be read (a blot or pen mark) keeps its place as an empty row, so later wells and
+  the controls at the end of the plate stay in the right wells.
+- "0, 0204" and "1: 1281" are read as decimals (the second is marked to check).
+
+## v1.4.5 (19 November 2026)
+- The photo or scanned slip is shown whole on screen (no taller than most of the screen), instead of at full
+  width, which made a scanned slip look zoomed in and need long scrolling.
+- Straightening is skipped when the slip's corners are found too high or low and would cut part of the
+  slip off (as on a 9 Nov HAV slip, where the straightened view stopped at sample 3); the photo is then
+  used as taken.
+
 ## v1.4.4 (19 November 2026)
 - A straightened (scanned) slip is also read as photographed, and the reading that finds more values,
   with fewer doubtful ones, is kept. Straightening helps most slips but distorted one HAV slip (9 Nov),

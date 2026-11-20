@@ -10,16 +10,18 @@
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="css/app.css">
+<script>try{var t=localStorage.getItem("eli-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 </head>
 <body>
 <div class="app">
   <header class="top">
     <div class="brand">
-      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="6" fill="var(--accent)"/><g fill="var(--accent-ink)"><circle cx="10" cy="10" r="3"/><circle cx="16" cy="10" r="3" opacity=".55"/><circle cx="22" cy="10" r="3" opacity=".3"/><circle cx="10" cy="16" r="3" opacity=".3"/><circle cx="16" cy="16" r="3"/><circle cx="22" cy="16" r="3" opacity=".55"/><circle cx="10" cy="22" r="3" opacity=".55"/><circle cx="16" cy="22" r="3" opacity=".3"/><circle cx="22" cy="22" r="3"/></g></svg>
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="6" fill="var(--accent)"/><g fill="var(--accent-ink)"><circle cx="10" cy="10" r="3" fill="var(--tmb)"/><circle cx="16" cy="10" r="3" opacity=".55"/><circle cx="22" cy="10" r="3" opacity=".3"/><circle cx="10" cy="16" r="3" opacity=".3"/><circle cx="16" cy="16" r="3" fill="var(--tmb)"/><circle cx="22" cy="16" r="3" opacity=".55"/><circle cx="10" cy="22" r="3" opacity=".55"/><circle cx="16" cy="22" r="3" opacity=".3"/><circle cx="22" cy="22" r="3" fill="var(--tmb)"/></g></svg>
       <div>
         <h1>ELI-Check</h1>
         <p class="sub">Checks reader results against the kit insert</p>
       </div>
+      <button class="btn small theme-btn" id="themeBtn" type="button" aria-label="Colour theme">Theme: Auto</button>
     </div>
     <nav class="tabs" aria-label="Sections">
       <a href="#runs" data-tab="runs">Runs</a>
