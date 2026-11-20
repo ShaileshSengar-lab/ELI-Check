@@ -6,21 +6,32 @@
   --accent: #0e6e66; --accent-ink: #ffffff; --accent-soft: #d8eeea;
   --ok: #2b7a48; --ok-soft: #e0f1e6; --warn: #96600a; --warn-soft: #fbefd5; --bad: #b42318; --bad-soft: #fbe2df;
   --info: #3b5b8c; --info-soft: #e3eaf5;
-  --tmb: #f2c200; --well: #fafbfb; --well-edge: #c5d0cd; --slip: #fbfbf8;
+  --tmb: #f2c200; --tmb-ink: #231d00; --flag-row: #fdf8ec; --miss-row: #fdf1ef; --well: #fafbfb; --well-edge: #c5d0cd; --slip: #fbfbf8;
   --f-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   --f-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
   --r: 8px;
   color-scheme: light;
 }
+/* Dark theme: follows the device unless a theme is chosen in the header (Auto, Light, Dark) */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1716; --panel: #162120; --sunk: #1d2a28; --line: #2c3c39; --fg: #e3ecea; --muted: #93a6a2;
-    --accent: #4fc2b5; --accent-ink: #06211e; --accent-soft: #163a3a;
-    --ok: #6fcb8f; --ok-soft: #173326; --warn: #e8b34a; --warn-soft: #3a2d12; --bad: #ff8a7e; --bad-soft: #3d1c19;
-    --info: #9bb9e8; --info-soft: #1d2a40;
-    --tmb: #e8bc12; --well: #1f2c2a; --well-edge: #3a4d49; --slip: #1a2523;
+  :root:not([data-theme="light"]) {
+    --bg: #16211f; --panel: #1d2b29; --sunk: #243431; --line: #344844; --fg: #e6efed; --muted: #9db0ac;
+    --accent: #5cc8bb; --accent-ink: #062420; --accent-soft: #1c4140;
+    --ok: #6fcb8f; --ok-soft: #183428; --warn: #f0b84c; --warn-soft: #3a2e14; --bad: #ff8a7e; --bad-soft: #3f1e1b;
+    --info: #9bb9e8; --info-soft: #1f2d43;
+    --tmb: #f2c200; --tmb-ink: #231d00; --well: #223230; --well-edge: #3d524e; --slip: #1f2d2b;
+    --flag-row: #222a20; --miss-row: #2c2321;
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #16211f; --panel: #1d2b29; --sunk: #243431; --line: #344844; --fg: #e6efed; --muted: #9db0ac;
+    --accent: #5cc8bb; --accent-ink: #062420; --accent-soft: #1c4140;
+    --ok: #6fcb8f; --ok-soft: #183428; --warn: #f0b84c; --warn-soft: #3a2e14; --bad: #ff8a7e; --bad-soft: #3f1e1b;
+    --info: #9bb9e8; --info-soft: #1f2d43;
+    --tmb: #f2c200; --tmb-ink: #231d00; --well: #223230; --well-edge: #3d524e; --slip: #1f2d2b;
+    --flag-row: #222a20; --miss-row: #2c2321;
+    color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -106,7 +117,9 @@ table.data th { position: sticky; top: 0; z-index: 1; background: var(--sunk); c
 table.data td { border-top: 1px solid var(--line); padding: 5px 9px; text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.data th.l, table.data td.l { text-align: left; }
 table.data td.t { font-family: var(--f-ui); text-align: left; white-space: normal; color: var(--muted); min-width: 160px; }
-table.data tr.flag td { background: var(--warn-soft); }
+table.data tr.flag td { background: var(--flag-row); }
+table.data tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+table.data tr.flag td.t { color: var(--warn); }
 table.data tr.bad td { background: var(--bad-soft); }
 table.data tr.rx td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 table.data tr.eq td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
@@ -114,8 +127,11 @@ table.data tr.ctrl td { background: var(--sunk); }
 table.edit td { padding: 3px 5px; }
 table.edit input, table.edit select { padding: 4px 6px; font-family: var(--f-mono); font-size: 12.5px; min-width: 64px; }
 table.edit select { min-width: 66px; font-family: var(--f-ui); }
-table.edit tr.flag td { background: var(--warn-soft); }
-table.edit tr.missing td { background: var(--bad-soft); }
+table.edit tr.flag td { background: var(--flag-row); }
+table.edit tr.flag td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+table.edit tr.flag td.t, table.edit tr.flag td:nth-last-child(2) { color: var(--warn); }
+table.edit tr.missing td { background: var(--miss-row); }
+table.edit tr.missing td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .checks { width: 100%; border-collapse: collapse; }
 .checks td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .checks tr:last-child td { border-bottom: 0; }
@@ -213,3 +229,13 @@ details > summary { cursor: pointer; font-weight: 650; }
 /* positive samples in the review table */
 table.data tr.pos td { background: var(--bad-soft); }
 table.data tr.pos.flag td { background: color-mix(in srgb, var(--bad-soft) 60%, var(--warn-soft)); }
+
+/* Brand touches: yellow (from the logo) marks the current section and the main photo action; it is
+   never used for QC flags, which stay amber and red */
+.tabs { padding-bottom: 7px; }
+.tabs a[aria-current="page"] { position: relative; }
+.tabs a[aria-current="page"]::after { content: ""; position: absolute; left: 28%; right: 28%; bottom: -7px; height: 3px; border-radius: 2px; background: var(--tmb); }
+.btn.brand { background: var(--tmb); border-color: var(--tmb); color: var(--tmb-ink); }
+.brand { width: 100%; }
+.theme-btn { margin-left: auto; align-self: center; }
+.theme-btn svg { width: 15px; height: 15px; }
