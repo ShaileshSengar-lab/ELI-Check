@@ -1,6 +1,29 @@
 /* Page code: views, storage on this device, import and export. */
 (function () {
   "use strict";
+
+  /* Colour theme: Auto follows the device; Light or Dark is remembered on this device */
+  (function themeSwitch() {
+    const btn = document.getElementById("themeBtn");
+    if (!btn) return;
+    const order = ["auto", "light", "dark"], label = { auto: "Auto", light: "Light", dark: "Dark" };
+    let cur = "auto";
+    try { const t = localStorage.getItem("eli-theme"); if (order.includes(t)) cur = t; } catch (e) { /* storage unavailable */ }
+    const apply = () => {
+      if (cur === "auto") document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", cur);
+      btn.textContent = "Theme: " + label[cur];
+      const dark = cur === "dark" || (cur === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", dark ? "#16211f" : "#0e6e66");
+    };
+    btn.onclick = () => {
+      cur = order[(order.indexOf(cur) + 1) % order.length];
+      try { if (cur === "auto") localStorage.removeItem("eli-theme"); else localStorage.setItem("eli-theme", cur); } catch (e) { /* not remembered */ }
+      apply();
+    };
+    apply();
+  })();
   const ASSAYS = window.ASSAYS, E = window.Engine, P = window.SlipParser, O = window.SlipOCR;
   const byId = Object.fromEntries(ASSAYS.map(a => [a.id, a]));
   const KEY = "erc.runs.v1", PREF = "erc.prefs.v1", DRAFT = "erc.draft.v1";
@@ -570,7 +593,7 @@
     const blocking = checks.filter(c => c.block).length;
     return `<div class="row between" style="margin-top:14px"><h3>Controls on this plate</h3>
         <div class="row"><button class="btn small" id="ctrlAdd">Add control</button></div></div>
-      <p class="note">For each control, check the well and type its OD from the slip. The typed OD is used for the calculation and checked against what was read. ${draft.format === "lisascan" ? "Wells come from the control lines printed on the slip." : (prefs.ctrlPat && prefs.ctrlPat[draft.assayId] ? `Wells are filled in as on your last ${esc(a.name)} run.` : "Wells are filled in from the kit's usual layout.")}</p>
+      <p class="note">For each control, check the well and type its OD from the slip. The typed OD is used for the calculation and checked against what was read. ${draft.format === "lisascan" ? "Wells come from the control lines printed on the slip." : draft.rolesTouched && (draft.ctrl || []).length ? "Wells come from the roles on the slip or as you set them." : (prefs.ctrlPat && prefs.ctrlPat[draft.assayId] ? `Wells are filled in as on your last ${esc(a.name)} run.` : "Wells are filled in from the kit's usual layout.")}</p>
       <div class="tbl"><table class="data edit" id="ctrlTable"><thead><tr><th class="l">Control</th><th class="l">Well</th><th class="l">OD from slip</th><th class="l">Check</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="5" class="note">No controls entered. Add the NC and PC wells.</td></tr>`}</tbody></table></div>
       <div class="row" style="margin:6px 0 12px"><label class="note" for="cNoPC"><input type="checkbox" id="cNoPC" ${draft.pcNotRun ? "checked" : ""} style="width:auto"> PC not run on this plate</label>
@@ -651,7 +674,8 @@
     const incoming = new Set(parsed.wells.map(w => w.pos));
     draft.wells = draft.wells.filter(w => !incoming.has(w.pos)).concat(parsed.wells)
       .sort((x, y) => E.posIndex(x.pos) - E.posIndex(y.pos));
-    if (parsed.format !== "lisascan") autoRoles();
+    if (parsed.rolesFromSlip) { draft.rolesTouched = true; }
+    else if (parsed.format !== "lisascan") autoRoles();
     ctrlFromRoles();
     renderReview();
     const unsure = parsed.wells.filter(w => w.uncertain || w.missing || w.labelMismatch).length;
@@ -736,9 +760,12 @@
         <span class="note">${shot.scanned ? "Scanned: the slip was found, straightened and the light evened out. Check that no part of the slip is cut off." : shot.auto ? "The slip was found and boxed automatically. Check the box covers the whole slip; drag to redraw it if not." : "Drag across the slip to read only that part."}</span></div>
       <div class="shot" id="shot"><div class="crop" id="cropBox" hidden></div></div>
       <div class="progress" hidden id="ocrProg"><div></div></div>
-      <div class="row"><button class="btn primary" id="readPhoto">Read values</button><button class="btn" id="closePhoto">Close photo</button><span class="note" id="ocrMsg"></span></div></div>`;
+      <div class="row"><button class="btn brand" id="readPhoto">Read values</button><button class="btn" id="closePhoto">Close photo</button><span class="note" id="ocrMsg"></span></div></div>`;
     const holder = $("#shot");
-    const disp = shot.canvas; disp.style.width = "100%";
+    // show the whole photo on screen: as wide as the panel allows, but never taller than most of the screen
+    const disp = shot.canvas;
+    Object.assign(disp.style, { width: "auto", height: "auto", maxWidth: "100%", maxHeight: "72vh" });
+    holder.style.width = "fit-content"; holder.style.maxWidth = "100%"; holder.style.margin = "0 auto";
     holder.prepend(disp);
     const box = $("#cropBox");
     const showCrop = () => {
@@ -783,6 +810,39 @@
         }
         return { parsed: P.parse(lines, opts), lines, opts, canvas, crop };
       };
+      const numOf = t => { const m = String(t || "").replace(/[,;:]/g, ".").match(/^\d?\.\d{2,4}$/); return m ? parseFloat(m[0]) : null; };
+      // strips laid side by side on a register: hide everything that is not slip paper, find each strip,
+      // and read each strip on its own
+      const readStrips = async (canvas) => {
+        const M = O.thermalMask(canvas);
+        if (!M) return null;
+        msg.textContent = "Finding the strips…";
+        const lay = await O.read(M.canvas, M.box, onProg, "3");
+        const regs = O.stripRegions(M, O.wordsToCanvas(lay.words, M.box));
+        if (!regs || regs.length < 2) return null;
+        const strips = [];
+        for (let i = 0; i < regs.length; i++) {
+          msg.textContent = `Reading strip ${i + 1} of ${regs.length}…`;
+          const r = await O.read(M.canvas, regs[i], onProg, "6");
+          strips.push({ crop: regs[i], lines: r.lines });
+        }
+        const parsed = P.parseStrips(strips.map(x => x.lines), { startPos: $("#startPos").value || "A1" });
+        // two independent readings: each value read strip by strip is compared with the same value in the
+        // layout reading; where they differ the value is marked to check
+        const layW = O.wordsToCanvas(lay.words, M.box).map(w => ({ ...w, v: numOf(w.text) })).filter(w => w.v != null);
+        parsed.wells.forEach(w => {
+          if (w.od == null || !w.strip) return;
+          const st = strips[w.strip - 1], line = st.lines.find(l => l.text === w.raw);
+          const ow = line && line.words.find(x => numOf(x.text) != null && Math.abs(numOf(x.text) - w.od) < 1e-9);
+          if (!ow) return;
+          const [cw] = O.wordsToCanvas([ow], st.crop), h = cw.y1 - cw.y0, yc = (cw.y0 + cw.y1) / 2;
+          const other = layW.find(x => Math.abs((x.y0 + x.y1) / 2 - yc) < h * 0.6 && x.x0 < cw.x1 && x.x1 > cw.x0);
+          if (other && Math.abs(other.v - w.od) > 1e-9) { w.uncertain = true; w.rereadAlt = other.v; }
+          // not found in the layout reading: read it again on its own below before trusting it
+          else if (!other) w.uncertain = true;
+        });
+        return { parsed, strips, canvas: M.canvas };
+      };
       // how good a reading is: values found, counting doubtful ones as half
       const score = r => r.parsed.wells.reduce((t, w) => t + (w.od == null ? 0 : w.uncertain ? 0.5 : 1), 0);
       try {
@@ -793,7 +853,26 @@
           msg.textContent = "Comparing with the original photo…";
           try { const alt = await readOnce(shot.original.canvas, shot.original.crop); if (score(alt) > score(best)) best = alt; } catch (e) { /* keep the scanned reading */ }
         }
+        if (best.parsed.format === "merilyzer") {
+          try {
+            const st = await readStrips(shot.original ? shot.original.canvas : shot.canvas);
+            if (st && score(st) > score(best)) best = st;
+          } catch (e) { /* keep the whole-photo reading */ }
+        }
         const { parsed, lines, opts } = best;
+        if (best.strips) {
+          // second reading of doubtful values, strip by strip
+          for (let si = 0; si < best.strips.length; si++) {
+            const sub = { wells: parsed.wells.filter(w => w.strip === si + 1) };
+            const t = P.rereadTargets(sub, best.strips[si].lines, 40);
+            if (!t.length) continue;
+            msg.textContent = `Checking ${t.length} doubtful value${t.length > 1 ? "s" : ""} on strip ${si + 1}…`;
+            try { const rr = await O.reread(best.canvas, best.strips[si].crop, t.map(x => x.word)); P.applyRereads(sub, t, rr); } catch (e) { /* keep the first reading */ }
+          }
+          $("#photoArea").hidden = true; shot = null;
+          ingest(parsed);
+          return;
+        }
         // second reading of doubtful values, each cut out and enlarged on its own
         const targets = P.rereadTargets(parsed, opts.words ? null : lines);
         if (targets.length) {

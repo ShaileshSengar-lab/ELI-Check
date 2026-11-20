@@ -285,6 +285,24 @@
     // outline (not several overlapping strips) and must not already fill the photo
     f.rect = f.fill / Math.max(1e-6, f.quadFill);
     if (!opt.force && (f.rect < 0.85 || f.quadFill > 0.8)) return { skipped: true, reason: f.quadFill > 0.8 ? "fills" : "shape", rect: f.rect, quadFill: f.quadFill };
+    // the region must be one slip lying within the photo: corners on the photo's edge mean the region
+    // is the page or desk around the slips, and a lopsided outline is not one straight slip
+    if (!opt.force) {
+      const q = f.corners, W0 = canvas.width, H0 = canvas.height, m = Math.min(W0, H0) * 0.015;
+      const onEdge = q.filter(([x, y]) => x < m || y < m || x > W0 - m || y > H0 - m).length;
+      const ang = i => { const a = q[(i + 3) % 4], b = q[i], c = q[(i + 1) % 4]; const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]]; return Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1)))) * 180 / Math.PI; };
+      const worst = Math.max(...[0, 1, 2, 3].map(i => Math.abs(ang(i) - 90)));
+      if (onEdge >= 2) return { skipped: true, reason: "edge", onEdge };
+      if (worst > 25) return { skipped: true, reason: "angle", worst };
+    }
+    // the four corners must take in the whole slip: if they span clearly less of its length than the slip
+    // found in the photo (or the photo itself, when the slip fills it), straightening would cut it short
+    if (!opt.force) {
+      let ref = null; try { ref = autoCrop(canvas); } catch (e) { ref = null; }
+      ref = ref || { y: 0, h: canvas.height };
+      const ys = f.corners.map(p => p[1]), span = Math.max(...ys) - Math.min(...ys);
+      if (span < ref.h * 0.85) return { skipped: true, reason: "short", span, ref: ref.h };
+    }
     const q = f.corners, dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
     let W = Math.round(Math.max(dist(q[0], q[1]), dist(q[3], q[2]))), H = Math.round(Math.max(dist(q[0], q[3]), dist(q[1], q[2])));
     if (W < 40 || H < 40) return null;
@@ -321,5 +339,101 @@
     return { canvas: out, corners: q, fill: f.fill, quadFill: f.quadFill };
   }
 
-  root.SlipOCR = { loadImage, rotate, read, autoCrop, reread, scan, findCorners };
+
+  /* ---------- Strips: slip pieces photographed side by side on a register ----------
+     Thermal paper is neutral to slightly bluish white; register paper is cream (less blue than red and
+     green). Everything that is not thermal paper (register, handwriting, desk) is painted white and the
+     light is evened out, so the strips read as clean print. stripRegions then uses a layout reading of
+     that image to find each column of values and boxes each strip (its labels to the left of the values),
+     so each strip can be read on its own as one block of lines. */
+  function thermalMask(canvas) {
+    const W = canvas.width, H = canvas.height;
+    const k = Math.min(1, 600 / Math.max(W, H));
+    const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d"); g.filter = "blur(2px)"; g.drawImage(canvas, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    let m = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      m[p] = (B - (R + G) / 2 > -6 && mx - mn < 35 && mn > 95) ? 1 : 0;
+    }
+    const morph = (src, r, dil) => {
+      const o = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = dil ? 0 : 1;
+        outer: for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {
+          if (dil) { if (src[yy * w + xx]) { v = 1; break outer; } } else if (!src[yy * w + xx]) { v = 0; break outer; }
+        }
+        o[y * w + x] = v;
+      }
+      return o;
+    };
+    m = morph(morph(m, 3, true), 3, false);   // close the holes left by printed text
+    m = morph(morph(m, 2, false), 2, true);   // remove specks
+    const keep = new Uint8Array(w * h), seen = new Uint8Array(w * h), st = [];
+    for (let s0 = 0; s0 < w * h; s0++) {
+      if (!m[s0] || seen[s0]) continue;
+      const px = []; st.push(s0); seen[s0] = 1;
+      while (st.length) {
+        const q = st.pop(); px.push(q); const x = q % w, y = (q - x) / w;
+        for (const nb of [x > 0 ? q - 1 : -1, x < w - 1 ? q + 1 : -1, y > 0 ? q - w : -1, y < h - 1 ? q + w : -1]) if (nb >= 0 && m[nb] && !seen[nb]) { seen[nb] = 1; st.push(nb); }
+      }
+      if (px.length > w * h * 0.02) px.forEach(q => { keep[q] = 1; });
+    }
+    const out = document.createElement("canvas"); out.width = W; out.height = H;
+    const og = out.getContext("2d"); og.drawImage(canvas, 0, 0);
+    const img = og.getImageData(0, 0, W, H), od = img.data;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0, n = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const q = Math.min(h - 1, Math.floor(y * k)) * w + Math.min(w - 1, Math.floor(x * k)), o = (y * W + x) * 4;
+      if (!keep[q]) { od[o] = od[o + 1] = od[o + 2] = 255; }
+      else { n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    og.putImageData(img, 0, 0);
+    if (!n || n < W * H * 0.04) return null;
+    // even out light and shade across the strips
+    const bl = document.createElement("canvas"); bl.width = W; bl.height = H;
+    const bc = bl.getContext("2d"); bc.filter = `blur(${Math.max(8, Math.round(Math.min(W, H) / 40))}px)`; bc.drawImage(out, 0, 0);
+    const bd = bc.getImageData(0, 0, W, H).data, im2 = og.getImageData(0, 0, W, H), d2 = im2.data;
+    for (let i = 0; i < d2.length; i += 4) for (let ch = 0; ch < 3; ch++) d2[i + ch] = Math.min(255, d2[i + ch] / Math.max(1, bd[i + ch]) * 235);
+    og.putImageData(im2, 0, 0);
+    return { canvas: out, box: { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }, mask: keep, mw: w, mh: h, mk: k, frac: n / (W * H) };
+  }
+
+  /* words: from a layout-mode reading of thermalMask's canvas, in that canvas's coordinates. */
+  function stripRegions(M, words) {
+    const vals = [];
+    words.forEach(w => { const t = String(w.text).replace(/[,;:]/g, "."); if (/^\d?\.\d{2,4}$/.test(t)) vals.push({ x0: w.x0, x1: w.x1, y0: w.y0, y1: w.y1, xc: (w.x0 + w.x1) / 2 }); });
+    if (vals.length < 4) return null;
+    const vw = vals.map(v => v.x1 - v.x0).sort((a, b) => a - b)[vals.length >> 1];
+    vals.sort((a, b) => a.xc - b.xc);
+    const cols = [];
+    vals.forEach(v => { const c = cols[cols.length - 1]; if (c && v.xc - c[c.length - 1].xc < vw * 1.2) c.push(v); else cols.push([v]); });
+    const { mask, mw, mh, mk } = M;
+    const regs = cols.filter(c => c.length >= 3).map(c => {
+      const vx0 = Math.min(...c.map(v => v.x0)), vx1 = Math.max(...c.map(v => v.x1));
+      const x0 = Math.max(0, vx0 - vw * 2.8), x1 = vx1 + vw * 0.4;
+      // the strip's height: rows of thermal paper under this column of values
+      const cx0 = Math.max(0, Math.floor(vx0 * mk)), cx1 = Math.min(mw - 1, Math.ceil(vx1 * mk));
+      let best = [0, -1], s = -1, last = -10;
+      for (let y = 0; y <= mh; y++) {
+        let on = false;
+        if (y < mh) { let n = 0; for (let x = cx0; x <= cx1; x++) n += mask[y * mw + x]; on = n > (cx1 - cx0 + 1) * 0.6; }
+        if (on) { if (s < 0 || y - last > 3) s = y; last = y; if (last - s > best[1] - best[0]) best = [s, last]; }
+      }
+      const y0 = best[0] / mk, y1 = (best[1] + 1) / mk;
+      return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0), n: c.length };
+    }).filter(r => r.w > 10 && r.h > 10);
+    return regs.length ? regs : null;
+  }
+
+  /* Prepared-image coordinates back to the canvas, for words read from a crop. */
+  function wordsToCanvas(words, crop, opt) {
+    const r = crop, target = (opt && opt.targetW) || 1100;
+    const sc = Math.max(1, Math.min((opt && opt.maxScale) || 3, target / r.w));
+    return words.map(w => ({ ...w, x0: w.x0 / sc + r.x, x1: w.x1 / sc + r.x, y0: w.y0 / sc + r.y, y1: w.y1 / sc + r.y }));
+  }
+
+  root.SlipOCR = { loadImage, rotate, read, autoCrop, reread, scan, findCorners, thermalMask, stripRegions, wordsToCanvas };
 })(this);

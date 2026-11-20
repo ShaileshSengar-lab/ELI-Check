@@ -17,6 +17,7 @@
     return String(line)
       .replace(/(\d)[,](\d)/g, "$1.$2")
       .replace(/(\d)\.\s+(\d)/g, "$1.$2")
+      .replace(/\b(\d)[,]\s+(\d{2,4})\b/g, "$1.$2")
       .replace(/(?<=\d|\.)[Oo](?=\d|\b)/g, "0")
       .replace(/\b[Oo](?=[.,]\d)/g, "0")
       .replace(/[|]/g, " ")
@@ -30,8 +31,12 @@
     return String(input || "").split(/\r?\n/).map(t => ({ text: t, conf: 100 }));
   }
 
+  // lines that start with a well label (allowing common misreadings) followed by an OD
+  const WELL_LINE = /^\s*[A-H(\[{£€¢©][0-9lI|!SZ]{1,2}\s+\d*[.,:]\s?\d{2,4}\b/;
   function detect(text) {
-    if (/TEST\s*RESULT|CUTOFF\s*EQ|\bSMP\b|SMP\/CO|Analyte/i.test(text)) return "lisascan";
+    if (/TEST\s*RESULT|CUTOFF\s*EQ|SMP\/CO|Analyte/i.test(text)) return "lisascan";
+    if (String(text).split(/\r?\n/).filter(l => WELL_LINE.test(l)).length >= 6) return "merilyzer";
+    if (/\bSMP\b/i.test(text)) return "lisascan";
     if (/MERILYZER|EIAQuant|Well\s+Id|Res\./i.test(text)) return "merilyzer";
     if (/^\s*(PC|NC)\s+\d/im.test(text)) return "lisascan";
     return "merilyzer";
@@ -53,13 +58,27 @@
       const t = clean(text);
       if (!t) continue;
       if (/Run\s*Date|Lab\s*Name|Address|Test\s*:|Filter|Print\s*Time|Plate\s*Report|MERILYZER|End\s*Of/i.test(t)) continue;
-      if (/Well\s+Id|\bOD\b\s+Res/i.test(t)) { started = true; continue; }
-      const nums = decimals(t);
-      if (!nums.length) { if (started && t.length > 2) skipped.push(text); continue; }
+      if (/Well\s+Id|\bOD\b\s+Res|^Well\b.*\b(OD|ABS)\b/i.test(t)) { started = true; continue; }
+      let tt = t, repaired = false;
+      let nums = decimals(tt);
+      // a decimal point read as a colon ("1: 1281")
+      if (!nums.length && /\d\s?[:;]\s?\d{3,4}\b/.test(tt)) { tt = tt.replace(/(\d)\s?[:;]\s?(\d{3,4})\b/, "$1.$2"); nums = decimals(tt); repaired = true; }
+      if (!nums.length) {
+        // a well label whose value cannot be read (a blot, a pen mark): keep its place as an empty row
+        const lab0 = started ? fuzzyLabel((tt.split(" ")[0] || "")) : null;
+        if (lab0 && tt.split(" ").length >= 2 && /\d/.test(tt.slice(2))) { entries.push({ label: lab0, od: null, conf: 0, raw: text, unreadable: true }); continue; }
+        if (started && t.length > 2) skipped.push(text); continue;
+      }
       const od = nums[nums.length - 1];
       if (od > 4.5) { skipped.push(text); continue; }
-      const head = t.slice(0, t.search(DEC)).trim().split(" ").filter(Boolean).pop() || "";
-      entries.push({ label: fuzzyLabel(head), od, conf, raw: text });
+      const at = tt.search(DEC);
+      const head = tt.slice(0, at).trim().split(" ").filter(Boolean).pop() || "";
+      // a role printed (or written) after the OD: "D5 0.1064 NC"
+      const ms = [...tt.matchAll(DEC)], lastM = ms[ms.length - 1];
+      const tail = tt.slice(lastM.index + lastM[0].length);
+      const rm = tail.match(/^\s*[-–—=~]*\s*(SMP|SAMPLE|NC|NEG|PC|POS|BLK|BLANK|BL|CAL|CO)\b/i);
+      const role = rm ? ({ SMP: "S", SAMPLE: "S", NC: "NC", NEG: "NC", PC: "PC", POS: "PC", BLK: "BLK", BLANK: "BLK", BL: "BLK", CAL: "CAL", CO: "CAL" })[rm[1].toUpperCase()] : null;
+      entries.push({ label: fuzzyLabel(head), od, conf: repaired ? Math.min(conf, 50) : conf, raw: text, slipRole: role || undefined });
       started = true;
     }
     return { entries, skipped };
@@ -69,7 +88,7 @@
   function fuzzyLabel(tok) {
     if (!tok || tok.length > 3) return null;
     if (/^[A-H](1[0-2]|[1-9])$/.test(tok)) return { pos: tok, exact: true };
-    const row = { "(": "C", "[": "C", "{": "C", "8": "B", "6": "G" }[tok[0]] || tok[0].toUpperCase();
+    const row = { "(": "C", "[": "C", "{": "C", "£": "C", "€": "C", "¢": "C", "©": "C", "8": "B", "6": "G" }[tok[0]] || tok[0].toUpperCase();
     if (!/[A-H]/.test(row)) return null;
     const col = tok.slice(1).replace(/[lIi|!\]]/g, "1").replace(/S/g, "5").replace(/Z/g, "2").replace(/O/g, "0").replace(/11+/g, "1");
     const pos = row + col;
@@ -249,6 +268,8 @@
       const pos = E.posAt(i++);
       if (!pos) break;
       const w = { pos, od: e.od, role: "S", conf: e.conf, raw: e.raw };
+      if (e.unreadable) { w.missing = true; w.uncertain = true; }
+      if (e.slipRole) w.slipRole = e.slipRole;
       if (lab && lab.exact && lab.pos !== pos) w.labelMismatch = lab.pos;
       if (e.conf < 75) w.uncertain = true;
       out.push(w);
@@ -520,6 +541,12 @@
     }
     const m = parseMerilyzer(lines);
     const seq = placeSequential(m.entries, opts.startPos);
+    // roles printed beside the ODs ("D5 0.1064 NC") are taken as given
+    const printedRoles = seq.filter(w => w.slipRole).length;
+    if (printedRoles && seq.some(w => w.slipRole && w.slipRole !== "S") && printedRoles >= seq.filter(w => !w.missing).length * 0.5) {
+      seq.forEach(w => { if (w.slipRole) w.role = w.slipRole; });
+      return { format, date, printed: null, wells: seq, skipped: m.skipped, rolesFromSlip: true };
+    }
     // with word positions from a photo, place by columns and labels when that finds more wells
     if (opts.words && opts.words.length) {
       const cols = placeColumns(opts.words);
@@ -527,6 +554,48 @@
       if (cols && nRead(cols) >= nRead(seq)) return { format, date, printed: null, wells: cols, skipped: m.skipped, layout: "columns" };
     }
     return { format, date, printed: null, wells: seq, skipped: m.skipped };
+  }
+
+  /* A slip cut into strips and photographed side by side, each strip read on its own (left to right).
+     Each strip is laid onto the plate from the start its well labels agree on; a strip whose labels
+     cannot be read continues from where the previous strip ended. */
+  function parseStrips(stripLines, opts = {}) {
+    let next = Math.max(0, E.posIndex(opts.startPos || "A1"));
+    const wells = new Map(), skipped = [];
+    let text = "";
+    stripLines.forEach((lines, si) => {
+      const L = toLines(lines);
+      text += L.map(l => l.text).join("\n") + "\n";
+      const m = parseMerilyzer(L);
+      skipped.push(...m.skipped);
+      if (!m.entries.length) return;
+      // start from the labels: each readable label votes for where the strip begins
+      const votes = new Map();
+      m.entries.forEach((e, j) => { if (!e.label) return; const s0 = E.posIndex(e.label.pos) - j; if (s0 >= 0) votes.set(s0, (votes.get(s0) || 0) + (e.label.exact ? 2 : 1)); });
+      let start = next, top = 0;
+      votes.forEach((v, s0) => { if (v > top) { top = v; start = s0; } });
+      if (top < 2) start = next;
+      const placed = placeSequential(m.entries, E.posAt(start));
+      if (start !== next && si > 0) placed.forEach(w => { if (!w.missing) w.stripStartFromLabels = true; });
+      placed.forEach(w => {
+        w.strip = si + 1;
+        const cur = wells.get(w.pos);
+        // strips overlapping in the photo can show a well twice: keep the surer reading, flag disagreement
+        if (!cur || cur.missing) { wells.set(w.pos, w); return; }
+        if (w.missing) return;
+        if (Math.abs(cur.od - w.od) > 1e-9) { const keep = (w.conf || 0) > (cur.conf || 0) ? w : cur; keep.uncertain = true; keep.duplicate = true; wells.set(w.pos, keep); }
+      });
+      const last = placed.filter(w => !w.missing).pop();
+      if (last) next = E.posIndex(last.pos) + 1;
+    });
+    const list = [...wells.values()].sort((a, b) => E.posIndex(a.pos) - E.posIndex(b.pos));
+    // fill gaps between strips so a missed line shows as an empty row to check
+    const out = [];
+    list.forEach((w, i) => {
+      if (i) for (let k = E.posIndex(list[i - 1].pos) + 1; k < E.posIndex(w.pos); k++) out.push({ pos: E.posAt(k), od: null, role: "S", missing: true, uncertain: true });
+      out.push(w);
+    });
+    return { format: "merilyzer", date: parseDate(text), printed: null, wells: out, skipped, layout: "strips" };
   }
 
   /* Second reading of doubtful values. rereadTargets finds the word box behind each flagged value;
@@ -578,7 +647,7 @@
     return parsed;
   }
 
-  const api = { parse, applyLayout, detect, parseDate, clean, pairWords, placeColumns, rereadTargets, applyRereads };
+  const api = { parse, parseStrips, applyLayout, detect, parseDate, clean, pairWords, placeColumns, rereadTargets, applyRereads };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SlipParser = api;
 })(this);
