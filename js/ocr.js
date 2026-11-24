@@ -354,10 +354,22 @@
     const g = c.getContext("2d"); g.filter = "blur(2px)"; g.drawImage(canvas, 0, 0, w, h);
     const d = g.getImageData(0, 0, w, h).data;
     let m = new Uint8Array(w * h);
+    // blueness of each lit pixel; under warm light the slip is less blue than in daylight, so the split
+    // between slip and register is found from the photo itself (Otsu), with a fixed split as fallback
+    const bl0 = new Float32Array(w * h), lit = new Uint8Array(w * h), hist = new Array(161).fill(0);
     for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-      const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
-      m[p] = (B - (R + G) / 2 > -6 && mx - mn < 35 && mn > 95) ? 1 : 0;
+      const R = d[i], G = d[i + 1], B = d[i + 2], mn = Math.min(R, G, B);
+      bl0[p] = B - (R + G) / 2;
+      if (mn > 70) { lit[p] = 1; hist[Math.max(0, Math.min(160, Math.round(bl0[p]) + 100))]++; }
     }
+    let thr = -6;
+    { const tot = hist.reduce((a, b) => a + b, 0); let sum = 0; hist.forEach((c, i) => { sum += i * c; });
+      let wB = 0, sB = 0, best = -1, bi = -1;
+      for (let i = 0; i < 161; i++) { wB += hist[i]; if (!wB) continue; const wF = tot - wB; if (!wF) break; sB += i * hist[i];
+        const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF); if (v > best) { best = v; bi = i; } }
+      if (bi >= 0) { let wl = 0, sl = 0, wh = 0, sh = 0; hist.forEach((c, i) => { if (i <= bi) { wl += c; sl += i * c; } else { wh += c; sh += i * c; } });
+        if (wl && wh && sh / wh - sl / wl >= 12 && wh / tot >= 0.04) thr = bi - 100; } }
+    for (let p = 0; p < w * h; p++) m[p] = lit[p] && bl0[p] > thr ? 1 : 0;
     const morph = (src, r, dil) => {
       const o = new Uint8Array(w * h);
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {

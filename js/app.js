@@ -668,7 +668,8 @@
       }
       draft.format = "lisascan";
     } else {
-      draft.format = draft.format || "merilyzer";
+      // a fresh run takes the format of this slip; an earlier format only carries over to further strips
+      draft.format = held ? (draft.format || "merilyzer") : "merilyzer";
     }
     // Replace any wells already at these positions
     const incoming = new Set(parsed.wells.map(w => w.pos));
@@ -803,6 +804,10 @@
         // OD-only slips (well label and OD per line): read again in page-layout mode, which keeps strips
         // photographed side by side apart, and place values by column and label
         if (P.detect(out.text) === "merilyzer") {
+          // a clean list (each line a well label and its OD) is kept as read
+          const first = P.parse(lines, opts);
+          const lab = first.wells.filter(w => !w.missing && w.raw && /^\s*[A-H](1[0-2]|[1-9])\s/.test(w.raw)).length;
+          if (first.rolesFromSlip || (first.wells.length >= 6 && lab >= first.wells.length * 0.8)) return { parsed: first, lines, opts, canvas, crop, clean: true };
           msg.textContent = "Reading the strips…";
           const out2 = await O.read(canvas, crop, onProg, "3");
           opts.words = out2.words;
@@ -851,9 +856,34 @@
         // straightening helps most slips but can distort one that is curled or partly in shade
         if (shot.scanned && shot.original) {
           msg.textContent = "Comparing with the original photo…";
-          try { const alt = await readOnce(shot.original.canvas, shot.original.crop); if (score(alt) > score(best)) best = alt; } catch (e) { /* keep the scanned reading */ }
+          try {
+            const alt = await readOnce(shot.original.canvas, shot.original.crop);
+            const [keep, other] = score(alt) > score(best) ? [alt, best] : [best, alt];
+            // the slip's header lines (cutoff, formula, grey zone) may be read in only one of the two
+            const kp = keep.parsed, op = other.parsed;
+            if (kp.format === "lisascan" && op.format === "lisascan" && op.printed) {
+              kp.printed = kp.printed || {};
+              if (!(kp.printed.cutoff > 0) && op.printed.cutoff > 0) { kp.printed.cutoff = op.printed.cutoff; kp.printed.formula = kp.printed.formula || op.printed.formula; }
+              if (!kp.printed.formula && op.printed.formula) kp.printed.formula = op.printed.formula;
+              if (!kp.printed.greyZone && op.printed.greyZone) kp.printed.greyZone = op.printed.greyZone;
+              if (!kp.testNo && op.testNo) kp.testNo = op.testNo;
+            }
+            best = keep;
+          } catch (e) { /* keep the scanned reading */ }
         }
-        if (best.parsed.format === "merilyzer") {
+        // no box drawn and the slip not found: hide the register sheet around the slip (it is less blue than
+        // thermal paper) and read just the slip, keeping that reading if it is better
+        if (!shot.crop && !shot.scanned && !best.clean) {
+          try {
+            const M = O.thermalMask(shot.canvas);
+            if (M && M.frac < 0.85) {
+              msg.textContent = "Reading the slip without the sheet around it…";
+              const alt = await readOnce(M.canvas, M.box);
+              if (score(alt) > score(best)) best = alt;
+            }
+          } catch (e) { /* keep the whole-photo reading */ }
+        }
+        if (best.parsed.format === "merilyzer" && !best.parsed.rolesFromSlip && !best.clean) {
           try {
             const st = await readStrips(shot.original ? shot.original.canvas : shot.canvas);
             if (st && score(st) > score(best)) best = st;

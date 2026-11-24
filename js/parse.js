@@ -36,9 +36,12 @@
   function detect(text) {
     if (/TEST\s*RESULT|CUTOFF\s*EQ|SMP\/CO|Analyte/i.test(text)) return "lisascan";
     if (String(text).split(/\r?\n/).filter(l => WELL_LINE.test(l)).length >= 6) return "merilyzer";
-    if (/\bSMP\b/i.test(text)) return "lisascan";
-    if (/MERILYZER|EIAQuant|Well\s+Id|Res\./i.test(text)) return "merilyzer";
-    if (/^\s*(PC|NC)\s+\d/im.test(text)) return "lisascan";
+    // LisaScan lists each sample as "SMP <no> <OD> <ratio> <flag>"; a stray SMP, or NC and PC written by
+    // hand beside a value, must not turn an OD-only slip into a LisaScan one
+    const smpLines = (String(text).match(/^\s*SMP\b.*\d[.,]\d/gim) || []).length;
+    if (/MERILYZER|EIAQuant|Well\s+Id|Res\./i.test(text) && smpLines < 3) return "merilyzer";
+    if (smpLines >= 3) return "lisascan";
+    if (/^\s*(PC|NC)\s+\d/im.test(text) && /\bSMP\b/i.test(text)) return "lisascan";
     return "merilyzer";
   }
 
