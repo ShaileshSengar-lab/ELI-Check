@@ -237,5 +237,5 @@ table.data tr.pos.flag td { background: color-mix(in srgb, var(--bad-soft) 60%, 
 .tabs a[aria-current="page"]::after { content: ""; position: absolute; left: 28%; right: 28%; bottom: -7px; height: 3px; border-radius: 2px; background: var(--tmb); }
 .btn.brand { background: var(--tmb); border-color: var(--tmb); color: var(--tmb-ink); }
 .brand { width: 100%; }
-.theme-btn { margin-left: auto; align-self: center; }
+.theme-btn { margin-left: auto; align-self: center; white-space: nowrap; flex: none; }
 .theme-btn svg { width: 15px; height: 15px; }
