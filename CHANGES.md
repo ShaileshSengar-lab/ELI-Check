@@ -1,5 +1,18 @@
 # Changes
 
+## v1.4.9 (24 November 2026)
+- A clean slip listing well, OD and role is kept exactly as first read; the second (page layout) reading,
+  which had dropped lines and moved values to the wrong wells, is now used only when the first reading
+  is incomplete.
+- NC and PC are taken from the roles on the slip.
+- A slip on a protocol sheet in warm light is now found by its colour (thermal paper is bluer than the
+  sheet, judged from each photo), and read without the sheet around it when the slip was not boxed.
+- When a slip is read both straightened and as photographed, the cutoff line, formula and grey zone are
+  taken from whichever reading found them, so the reader-versus-insert cutoff check is not lost.
+- The Theme button stays on one line on phones.
+- A stray "SMP", or NC and PC written by hand, no longer makes an OD only slip read as a LisaScan slip,
+  and a new run no longer keeps the slip type of an earlier one.
+
 ## v1.4.7 (20 November 2026)
 - Theme button in the header: Auto (follows the device), Light or Dark, remembered on each device.
 - Rows to check are marked with a thin amber bar and amber note instead of shading the whole row; empty
